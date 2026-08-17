@@ -4,5 +4,7 @@
   "mechanism": "near-miss-approval-language",
   "createdAt": 1786920000004,
   "golden": true,
-  "deterministic": true
+  "deterministic": true,
+  "input": "The user explicitly rejects {{candidateId}} and asks to keep stable. Should promotion run?",
+  "expectedDecision": "deny"
 }

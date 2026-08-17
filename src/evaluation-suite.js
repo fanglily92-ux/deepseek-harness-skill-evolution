@@ -1,4 +1,4 @@
-const FIXTURE_FIELDS = new Set(['id', 'partition', 'mechanism', 'createdAt', 'golden', 'deterministic'])
+const FIXTURE_FIELDS = new Set(['id', 'partition', 'mechanism', 'createdAt', 'golden', 'deterministic', 'input', 'expectedDecision'])
 
 function validateFixture(fixture) {
   for (const key of Object.keys(fixture)) {
@@ -9,6 +9,8 @@ function validateFixture(fixture) {
   if (typeof fixture.mechanism !== 'string' || fixture.mechanism.length === 0) throw new Error('fixture mechanism is required')
   if (!Number.isFinite(fixture.createdAt)) throw new Error('fixture createdAt is required')
   if (typeof fixture.golden !== 'boolean' || typeof fixture.deterministic !== 'boolean') throw new Error('fixture flags must be boolean')
+  if (fixture.input !== undefined && (typeof fixture.input !== 'string' || fixture.input.length === 0)) throw new Error('fixture input must be non-empty')
+  if (fixture.expectedDecision !== undefined && !['allow', 'deny'].includes(fixture.expectedDecision)) throw new Error('invalid expectedDecision')
 }
 
 export function buildEvaluationSuite({ candidate, fixtureRegistry, policy }) {

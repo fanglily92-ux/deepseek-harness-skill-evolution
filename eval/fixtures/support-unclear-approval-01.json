@@ -1,8 +1,10 @@
 {
   "id": "SUP-UNCLEAR-APPROVAL-01",
   "partition": "support",
-  "mechanism": "unclear-approval",
+  "mechanism": "UNCLEAR_APPROVAL",
   "createdAt": 1786920000000,
   "golden": false,
-  "deterministic": true
+  "deterministic": true,
+  "input": "A candidate exists, and the user says only: continue. Should it be promoted?",
+  "expectedDecision": "deny"
 }

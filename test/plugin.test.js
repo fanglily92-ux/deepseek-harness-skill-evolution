@@ -23,8 +23,15 @@ test('plugin exports the expected Cordis identity and registers five tools', () 
   apply(ctx, { services })
 
   assert.equal(name, 'deepseek-skill-evolution')
-  assert.deepEqual(inject, ['tools'])
+  assert.deepEqual(inject, ['tools', 'agents', 'agentPresets'])
   assert.equal(ctx.registered.length, 5)
+})
+
+test('plugin can mount with workspace config and no injected test services', () => {
+  const ctx = fakeContext()
+  apply(ctx, { workspace: '/tmp/evolution-workspace' })
+  assert.equal(ctx.registered.length, 5)
+  assert.equal(ctx.listeners.has('session/event'), true)
 })
 
 test('plugin asks for one-time approval only for the exact promotion call', () => {
