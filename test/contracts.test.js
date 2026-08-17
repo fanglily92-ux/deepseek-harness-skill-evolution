@@ -21,12 +21,12 @@ test('createCandidateId rejects a sequence outside 1 through 999', () => {
 })
 
 test('createCaseId is deterministic without exposing the session identifier', () => {
-  const first = createCaseId('private-session-name', 12, 'optimize-work-strategy')
-  const second = createCaseId('private-session-name', 12, 'optimize-work-strategy')
+  const first = createCaseId('synthetic-session-name', 12, 'optimize-work-strategy')
+  const second = createCaseId('synthetic-session-name', 12, 'optimize-work-strategy')
 
   assert.equal(first, second)
   assert.match(first, /^CASE-[a-f0-9]{16}$/)
-  assert.equal(first.includes('private-session-name'), false)
+  assert.equal(first.includes('synthetic-session-name'), false)
 })
 
 test('createCaseId changes when a receipt coordinate changes', () => {

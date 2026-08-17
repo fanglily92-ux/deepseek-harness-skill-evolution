@@ -3,8 +3,20 @@
   "version": "0.1.0",
   "description": "A local, approval-gated Skill evolution workbench for DeepSeek Harness.",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "src/",
+    "config/",
+    "eval/",
+    "skills/",
+    "scripts/",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -13,7 +25,9 @@
     "test": "node --test",
     "install:harness": "node scripts/install-harness.js",
     "doctor": "node scripts/doctor.js",
-    "scan:sensitive": "node scripts/scan-sensitive.js"
+    "scan:sensitive": "node scripts/scan-sensitive.js",
+    "check:licenses": "node scripts/check-licenses.js",
+    "release:check": "npm test && npm run check && npm run scan:sensitive && npm run check:licenses"
   },
   "dependencies": {
     "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",

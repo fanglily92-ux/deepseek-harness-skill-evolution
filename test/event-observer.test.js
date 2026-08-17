@@ -11,11 +11,11 @@ test('createEventObserver emits one privacy-bounded receipt for a whitelisted Sk
     whitelist: new Set(['optimize-work-strategy']),
     now: () => 1786924800000,
   })
-  const session = { id: 'private-session-id' }
+  const session = { id: 'synthetic-session-id' }
   const events = [
     {
       type: 'user/message', seq: 1, time: 100,
-      data: { turn: 4, source: { kind: 'user' }, content: [{ type: 'text', text: '这不对，请重新做。API_KEY=secret' }] },
+      data: { turn: 4, source: { kind: 'user' }, content: [{ type: 'text', text: '这不对，请重新做。SENSITIVE_MARKER_7F3A' }] },
     },
     {
       type: 'tool/call', seq: 2, time: 110,
@@ -60,7 +60,7 @@ test('createEventObserver emits one privacy-bounded receipt for a whitelisted Sk
   assert.equal(appended[0].outcome, 'failure')
   assert.match(appended[0].sessionHash, /^[a-f0-9]{64}$/)
   const serialized = JSON.stringify(appended[0])
-  for (const secret of ['private-session-id', 'API_KEY=secret', 'private Skill body', 'echo secret', 'secret output', 'private error']) {
+  for (const secret of ['synthetic-session-id', 'SENSITIVE_MARKER_7F3A', 'private Skill body', 'echo secret', 'secret output', 'private error']) {
     assert.equal(serialized.includes(secret), false)
   }
 })

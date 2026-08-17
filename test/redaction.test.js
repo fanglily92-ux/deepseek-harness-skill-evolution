@@ -8,7 +8,7 @@ import {
 
 test('classifyDirectUserSignal detects a correction without returning its text', () => {
   const result = classifyDirectUserSignal([
-    { type: 'text', text: '这不对，请重新做。API_KEY=secret' },
+    { type: 'text', text: '这不对，请重新做。SENSITIVE_MARKER_7F3A' },
   ])
 
   assert.equal(result, 'negative')

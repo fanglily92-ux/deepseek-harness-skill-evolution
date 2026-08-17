@@ -4,6 +4,7 @@ coverage/
 *.log
 *.lock
 *.tmp
+*.tgz
 .env
 .env.*
 !.env.example
