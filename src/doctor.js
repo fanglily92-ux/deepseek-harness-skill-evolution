@@ -1,0 +1,92 @@
+import { lstat, readFile, readdir } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
+import { dirname, join, resolve } from 'node:path'
+
+import { installerContract } from './installer.js'
+
+async function regularFile(path) {
+  try {
+    const stat = await lstat(path)
+    return stat.isFile() && !stat.isSymbolicLink()
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function readText(path) {
+  try {
+    return await readFile(path, 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+function check(id, ok, detail) {
+  return { id, ok: Boolean(ok), detail }
+}
+
+function readDshVersion(versionReader) {
+  if (versionReader) return String(versionReader()).trim()
+  const result = spawnSync('dsh', ['--version'], { encoding: 'utf8', timeout: 5000 })
+  if (result.error || result.status !== 0) return null
+  return String(result.stdout || result.stderr).trim()
+}
+
+async function hasNoLockFiles(paths) {
+  for (const path of paths) {
+    try {
+      const entries = await readdir(path)
+      if (entries.some((entry) => entry.endsWith('.lock'))) return false
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  return true
+}
+
+export async function runDoctor(options) {
+  const workspace = resolve(options.workspace)
+  const pluginEntry = resolve(options.pluginEntry)
+  const presetPath = resolve(options.presetPath)
+  const stateRoot = join(workspace, 'logs', 'DeepSeek-Harness自进化', 'state')
+  const skillPath = join(workspace, '.dsh', 'skills', 'optimize-work-strategy', 'SKILL.md')
+  const pluginRoot = dirname(pluginEntry)
+  const whitelistPath = join(pluginRoot, 'config', 'whitelist.json')
+  const dashboardPath = join(workspace, '知识库', 'DeepSeek Harness自进化工作台', '工作台首页.md')
+  const dshVersion = readDshVersion(options.versionReader)
+  const preset = await readText(presetPath)
+  const whitelist = await readText(whitelistPath)
+
+  let whitelistOk = false
+  try {
+    const parsed = JSON.parse(whitelist ?? '')
+    whitelistOk = parsed.schemaVersion === 1 && Array.isArray(parsed.skills) && parsed.skills.includes('optimize-work-strategy')
+  } catch {}
+
+  const presetOk = Boolean(
+    preset
+      && new RegExp(`^\\s*-\\s+id:\\s*${installerContract.pluginId}\\s*$`, 'm').test(preset)
+      && preset.includes(JSON.stringify(pluginEntry))
+      && preset.includes(JSON.stringify(workspace)),
+  )
+
+  const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10)
+  const checks = [
+    check('platform', ['darwin', 'linux'].includes(process.platform), process.platform),
+    check('node', nodeMajor >= installerContract.minimumNodeMajor, process.versions.node),
+    check('dsh', Boolean(dshVersion), dshVersion ?? 'dsh command unavailable'),
+    check('harness-version', dshVersion === installerContract.supportedHarnessVersion, dshVersion ?? 'unknown'),
+    check('plugin-entry', await regularFile(pluginEntry), pluginEntry),
+    check('preset', presetOk, presetPath),
+    check('skill', await regularFile(skillPath), skillPath),
+    check('whitelist', whitelistOk, whitelistPath),
+    check('ledger', await regularFile(join(stateRoot, 'receipts.jsonl')), join(stateRoot, 'receipts.jsonl')),
+    check('candidate-state', await regularFile(join(stateRoot, 'candidates.json')), join(stateRoot, 'candidates.json')),
+    check('versions', await regularFile(join(stateRoot, 'versions.jsonl')), join(stateRoot, 'versions.jsonl')),
+    check('locks', await hasNoLockFiles([stateRoot, join(workspace, '.dsh', 'skills', 'optimize-work-strategy', 'references')]), 'no stale lock files'),
+    check('dashboard', await regularFile(dashboardPath), dashboardPath),
+  ]
+  return { ok: checks.every((item) => item.ok), checks }
+}
