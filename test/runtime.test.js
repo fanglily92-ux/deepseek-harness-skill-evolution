@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,8 +9,8 @@ import { ReceiptLedger } from '../src/receipt-ledger.js'
 import { resolveWorkbenchPaths } from '../src/paths.js'
 
 async function fixture() {
-  const workspace = await mkdtemp(join(tmpdir(), 'evolution-runtime-'))
-  const authorityRoot = await mkdtemp(join(tmpdir(), 'evolution-authority-'))
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-runtime-')))
+  const authorityRoot = await realpath(await mkdtemp(join(tmpdir(), 'evolution-authority-')))
   const strategyPath = join(authorityRoot, 'skills', 'optimize-work-strategy', 'references', 'strategies.yaml')
   await mkdir(join(strategyPath, '..'), { recursive: true })
   await writeFile(strategyPath, '{"schemaVersion":1,"stableVersion":0,"rules":[]}\n', { flag: 'wx' })
@@ -183,4 +183,15 @@ test('runtime atomically claims one validation attempt across processes', async 
   release()
   await running
   assert.equal(evaluations, 1)
+})
+
+test('runtime refuses a symlinked workspace alias', async () => {
+  const setup = await fixture()
+  const aliasRoot = await realpath(await mkdtemp(join(tmpdir(), 'runtime-workspace-alias-')))
+  const workspaceAlias = join(aliasRoot, 'workspace-alias')
+  await symlink(setup.workspace, workspaceAlias)
+  assert.throws(
+    () => createRuntimeServices({ workspace: workspaceAlias, authorityRoot: setup.authorityRoot }),
+    /workspace must not be a symlink or aliased path/,
+  )
 })

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { assertAuthorityRootOutsideSandboxTemp } from '../src/paths.js'
+import { assertAuthorityRootOutsideSandboxTemp, canonicalWorkbenchRoots } from '../src/paths.js'
 
 const REQUIRED_VERSION = '0.1.0-rc.6'
 
@@ -41,6 +41,9 @@ export async function verifyHarnessBoundary() {
   const writableSystemTemp = mkdtempSync(join(existsSync('/private/tmp') ? '/private/tmp' : '/tmp', 'dsh-evolution-writable-temp-'))
   mkdirSync(join(tempRoot, 'workspace'))
   mkdirSync(join(tempRoot, 'authority'))
+  mkdirSync(join(tempRoot, 'real-workspace'))
+  mkdirSync(join(tempRoot, 'real-workspace', 'nested-authority'))
+  symlinkSync(join(tempRoot, 'real-workspace'), join(tempRoot, 'workspace-alias'))
   const workspace = realpathSync(join(tempRoot, 'workspace'))
   const authority = realpathSync(join(tempRoot, 'authority'))
   try {
@@ -58,11 +61,16 @@ export async function verifyHarnessBoundary() {
     const systemTemp = executeConfined(provider, systemTempTarget, workspace)
     let sandboxTempRejectedAsAuthority = false
     try { assertAuthorityRootOutsideSandboxTemp(writableSystemTemp) } catch { sandboxTempRejectedAsAuthority = true }
+    let workspaceAliasRejected = false
+    try {
+      canonicalWorkbenchRoots(join(tempRoot, 'workspace-alias'), join(tempRoot, 'real-workspace', 'nested-authority'))
+    } catch { workspaceAliasRejected = true }
     const result = {
       ok: allowed.status === 0 && existsSync(workspaceTarget)
         && denied.status !== 0 && !existsSync(authorityTarget)
         && systemTemp.status === 0 && existsSync(systemTempTarget)
-        && sandboxTempRejectedAsAuthority,
+        && sandboxTempRejectedAsAuthority
+        && workspaceAliasRejected,
       harnessVersion: REQUIRED_VERSION,
       sandboxPackage: '@deepseek-ai/dsh-sandbox-local',
       enforcement: allowed.enforcement,
@@ -70,6 +78,7 @@ export async function verifyHarnessBoundary() {
       authorityWriteDenied: denied.status !== 0 && !existsSync(authorityTarget),
       sandboxTempWrite: systemTemp.status === 0 && existsSync(systemTempTarget),
       sandboxTempRejectedAsAuthority,
+      workspaceAliasRejected,
     }
     if (!result.ok) throw new Error(`authority boundary probe failed: ${JSON.stringify({ allowed, denied })}`)
     return result

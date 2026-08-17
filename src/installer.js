@@ -3,7 +3,7 @@ import { lstat, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/pr
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { atomicReplace, sha256, snapshotRegularFile } from './atomic-files.js'
-import { assertAuthorityRootOutsideSandboxTemp, assertContainedPathNoSymlinks } from './paths.js'
+import { assertAuthorityRootOutsideSandboxTemp, assertContainedPathNoSymlinks, canonicalWorkbenchRoots } from './paths.js'
 
 const SUPPORTED_HARNESS_VERSION = '0.1.0-rc.6'
 const MINIMUM_NODE_MAJOR = 22
@@ -66,12 +66,13 @@ function appendBlockFor({ workspace, authorityRoot, pluginEntry }) {
   ].join('\n')
 }
 
-export async function planInstall(options, { authorityGuard = assertAuthorityRootOutsideSandboxTemp } = {}) {
+export async function planInstall(options, { authorityGuard = assertAuthorityRootOutsideSandboxTemp, rootGuard = canonicalWorkbenchRoots } = {}) {
   assertSupportedVersions(options)
   const sourceRoot = resolve(options.sourceRoot)
   const dshHome = resolve(options.dshHome)
   authorityGuard(dshHome)
   const workspace = resolve(options.workspace)
+  rootGuard(workspace, dshHome)
   const presetPath = resolve(options.presetPath)
   const packageJson = JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8'))
   if (packageJson.name !== 'deepseek-harness-skill-evolution' || typeof packageJson.version !== 'string') throw new Error('invalid plugin package manifest')

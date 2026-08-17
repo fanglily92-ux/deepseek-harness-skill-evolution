@@ -47,7 +47,7 @@ V1 的实时评估只处理有预提交客观标签的 fixture；标签打分是
 
 ## 威胁模型与 authority 边界
 
-权威 plugin code、stable Skill、fixture、catalog、candidate/report、receipt ledger 和 head/count anchor 都位于 workspace 之外的 `$DSH_HOME`。插件只在 `shell`、`fs` 和当前 session policy 都是 `read-only` 或 `workspace-write` 时挂载，禁止运行中 sandbox escalation，并逐一拒绝 `os.tmpdir()`、`/tmp`、`/private/tmp`、`/var/tmp`、`/private/var/tmp` 及其 realpath 别名。project Skill 在挂载时和每次演化调用时都会触发失败关闭。`npm run verify:authority` 使用本机 rc.6 官方 `dsh-sandbox-local` 真实进程验证 workspace 可写且非临时 authority sibling 不可写。
+权威 plugin code、stable Skill、fixture、catalog、candidate/report、receipt ledger 和 head/count anchor 都位于 workspace 之外的 `$DSH_HOME`。插件只在 `shell`、`fs` 和当前 session policy 都是 `read-only` 或 `workspace-write` 时挂载，禁止运行中 sandbox escalation。workspace 与 authority 必须是各自请求路径的 exact realpath，拒绝 symlink/alias，并在 canonical 路径上验证双向互不包含；authority 还逐一拒绝 `os.tmpdir()`、`/tmp`、`/private/tmp`、`/var/tmp`、`/private/var/tmp` 及其 realpath 别名。project Skill 在挂载时和每次演化调用时都会触发失败关闭。`npm run verify:authority` 使用本机 rc.6 官方 `dsh-sandbox-local` 真实进程验证 workspace 可写、非临时 authority sibling 不可写，并确认 workspace alias 会在调用 sandbox 前被共享守卫拒绝。
 
 此边界防御通过 Harness agent 工具的绕过，不宣称防御已获得同一 OS 账户和独立本机终端权限的恶意进程。所有权威路径在打开前逐级拒绝 symlink；跨进程 lock、anchor 和 journal 对并发与崩溃失败关闭。
 

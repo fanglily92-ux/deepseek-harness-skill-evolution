@@ -25,29 +25,26 @@ export function assertAuthorityRootOutsideSandboxTemp(authorityRoot, { temporary
   return authority
 }
 
-export function resolveWorkbenchPaths(workspace, { authorityRoot, homePath = homedir() } = {}) {
-  if (typeof workspace !== 'string' || !isAbsolute(workspace)) {
-    throw new Error('workspace must be an absolute path')
-  }
-
-  const root = resolve(workspace)
-  if (root === resolve('/')) {
-    throw new Error('workspace root is too broad')
-  }
-  if (root === resolve(homePath)) {
-    throw new Error('workspace may not be the home directory')
-  }
+export function canonicalWorkbenchRoots(workspace, authorityRoot, { homePath = homedir(), realpath = realpathSync } = {}) {
+  if (typeof workspace !== 'string' || !isAbsolute(workspace)) throw new Error('workspace must be an absolute path')
   if (typeof authorityRoot !== 'string' || !isAbsolute(authorityRoot)) throw new Error('authorityRoot must be an absolute path')
-  const authority = resolve(authorityRoot)
+  const requestedWorkspace = resolve(workspace)
+  const requestedAuthority = resolve(authorityRoot)
+  const root = realpath(requestedWorkspace)
+  const authority = realpath(requestedAuthority)
+  if (root !== requestedWorkspace) throw new Error('workspace must not be a symlink or aliased path')
+  if (authority !== requestedAuthority) throw new Error('authorityRoot must not be a symlink or aliased path')
+  if (root === resolve('/') || root === resolve(homePath)) throw new Error(root === resolve('/') ? 'workspace root is too broad' : 'workspace may not be the home directory')
   if (authority === resolve('/') || authority === resolve(homePath)) throw new Error('authorityRoot is too broad')
   const authorityFromWorkspace = relative(root, authority)
-  if (authorityFromWorkspace === '' || (!authorityFromWorkspace.startsWith('..') && !isAbsolute(authorityFromWorkspace))) {
-    throw new Error('authorityRoot must be outside workspace')
-  }
+  if (authorityFromWorkspace === '' || (!authorityFromWorkspace.startsWith('..') && !isAbsolute(authorityFromWorkspace))) throw new Error('authorityRoot must be outside workspace')
   const workspaceFromAuthority = relative(authority, root)
-  if (workspaceFromAuthority === '' || (!workspaceFromAuthority.startsWith('..') && !isAbsolute(workspaceFromAuthority))) {
-    throw new Error('authorityRoot must not contain workspace')
-  }
+  if (workspaceFromAuthority === '' || (!workspaceFromAuthority.startsWith('..') && !isAbsolute(workspaceFromAuthority))) throw new Error('authorityRoot must not contain workspace')
+  return { workspace: root, authorityRoot: authority }
+}
+
+export function resolveWorkbenchPaths(workspace, { authorityRoot, homePath = homedir(), realpath = realpathSync } = {}) {
+  const { workspace: root, authorityRoot: authority } = canonicalWorkbenchRoots(workspace, authorityRoot, { homePath, realpath })
 
   const stateRoot = join(authority, '.skill-evolution-authority', 'state')
   const paths = {

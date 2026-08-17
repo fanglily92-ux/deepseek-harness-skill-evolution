@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,7 +9,7 @@ import { detectHarnessVersion, installHarness, planInstall } from '../src/instal
 const isolatedFixtureDependencies = { authorityGuard() {} }
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'evolution-install-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'evolution-install-')))
   const dshHome = join(root, '.dsh')
   const workspace = join(root, 'workspace')
   const sourceRoot = join(root, 'source')
@@ -92,4 +92,16 @@ test('planInstall rejects a symlinked authority parent', async () => {
 test('planInstall rejects a sandbox-writable temporary DSH home', async () => {
   const options = await fixture()
   await assert.rejects(planInstall(options), /temporary directory|symlink or aliased path/)
+})
+
+test('planInstall rejects a symlinked workspace alias', async () => {
+  const options = await fixture()
+  const realWorkspace = join(options.root, 'real-workspace')
+  const workspaceAlias = join(options.root, 'workspace-alias')
+  await mkdir(realWorkspace)
+  await symlink(realWorkspace, workspaceAlias)
+  await assert.rejects(
+    planInstall({ ...options, workspace: workspaceAlias }, isolatedFixtureDependencies),
+    /workspace must not be a symlink or aliased path/,
+  )
 })

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 import { createChildAgentArmRunner, createHarnessEvaluator } from '../src/harness-evaluator.js'
@@ -12,8 +12,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 test('Harness evaluator runs paired fixtures with identical environment and returns a validator report', async () => {
   const calls = []
-  const workspace = await mkdtemp(join(tmpdir(), 'evolution-harness-evaluator-'))
-  const authorityRoot = await mkdtemp(join(tmpdir(), 'evolution-harness-authority-'))
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-harness-evaluator-')))
+  const authorityRoot = await realpath(await mkdtemp(join(tmpdir(), 'evolution-harness-authority-')))
   const skillDirectory = join(authorityRoot, 'skills', 'optimize-work-strategy')
   await mkdir(join(skillDirectory, 'references'), { recursive: true })
   await writeFile(join(skillDirectory, 'SKILL.md'), 'STABLE_SKILL_MARKER\n')

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -37,15 +37,16 @@ test('plugin exports the expected Cordis identity and registers five tools', () 
   assert.equal(ctx.registered.length, 5)
 })
 
-test('plugin can mount with workspace config and no injected test services', () => {
-  const ctx = fakeContext()
-  apply(ctx, { workspace: '/tmp/evolution-workspace', authorityRoot: projectRoot })
+test('plugin can mount with workspace config and no injected test services', async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-plugin-workspace-')))
+  const ctx = fakeContext(workspace)
+  apply(ctx, { workspace, authorityRoot: projectRoot })
   assert.equal(ctx.registered.length, 5)
   assert.equal(ctx.listeners.has('session/event'), true)
 })
 
 test('plugin refuses to mount when a project Skill shadows the protected Skill', async () => {
-  const workspace = await mkdtemp(join(tmpdir(), 'evolution-plugin-shadow-'))
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-plugin-shadow-')))
   await mkdir(join(workspace, '.dsh', 'skills', 'optimize-work-strategy'), { recursive: true })
   const ctx = fakeContext(workspace)
 
@@ -57,7 +58,7 @@ test('plugin refuses to mount when a project Skill shadows the protected Skill',
 })
 
 test('plugin denies evolution calls if a project Skill appears after mount', async () => {
-  const workspace = await mkdtemp(join(tmpdir(), 'evolution-plugin-late-shadow-'))
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-plugin-late-shadow-')))
   const ctx = fakeContext(workspace)
   apply(ctx, { services, workspace, authorityRoot: projectRoot })
   await mkdir(join(workspace, '.dsh', 'skills', 'optimize-work-strategy'), { recursive: true })
@@ -83,21 +84,23 @@ test('plugin asks for one-time approval only for the exact promotion call', asyn
 })
 
 test('plugin denies obvious non-evolution writes to authority files as defense in depth', async () => {
-  const ctx = fakeContext()
-  apply(ctx, { services, workspace: '/tmp/evolution-workspace', authorityRoot: projectRoot })
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-plugin-workspace-')))
+  const ctx = fakeContext(workspace)
+  apply(ctx, { services, workspace, authorityRoot: projectRoot })
   const gate = ctx.listeners.get('tools/pre-execute')
   const result = await gate({ name: 'bash', arguments: { command: 'printf x > .dsh/skills/optimize-work-strategy/references/strategies.yaml' } }, () => ({ kind: 'allow' }))
   assert.deepEqual(result, { kind: 'deny', reason: 'Authority state may be changed only through evolution tools.' })
 })
 
 test('plugin rejects unconfined sessions and all sandbox escalation requests', async () => {
-  const ctx = fakeContext()
-  apply(ctx, { services, workspace: '/tmp/evolution-workspace', authorityRoot: projectRoot })
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-plugin-workspace-')))
+  const ctx = fakeContext(workspace)
+  apply(ctx, { services, workspace, authorityRoot: projectRoot })
   const gate = ctx.listeners.get('tools/pre-execute')
   assert.deepEqual(await gate({ name: 'bash', arguments: { command: 'true', sandbox_permissions: 'danger-full-access' } }, () => ({ kind: 'allow' })), {
     kind: 'deny', reason: 'Sandbox escalation is disabled while the Skill evolution authority is mounted.',
   })
-  ctx.sandboxPolicy.resolve = async () => ({ mode: 'danger-full-access', workspaceRoot: '/tmp/evolution-workspace' })
+  ctx.sandboxPolicy.resolve = async () => ({ mode: 'danger-full-access', workspaceRoot: workspace })
   assert.deepEqual(await gate({ name: 'bash', arguments: { command: 'true' } }, () => ({ kind: 'allow' })), {
     kind: 'deny', reason: 'Skill evolution requires a workspace-confined agent session.',
   })

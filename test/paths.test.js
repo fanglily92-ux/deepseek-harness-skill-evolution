@@ -12,7 +12,7 @@ import {
 } from '../src/paths.js'
 
 test('resolveWorkbenchPaths returns only paths contained by the workspace', () => {
-  const paths = resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/authority/dsh', homePath: '/home/tester' })
+  const paths = resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/authority/dsh', homePath: '/home/tester', realpath: (value) => value })
 
   assert.equal(
     paths.receipts,
@@ -36,15 +36,30 @@ test('assertContainedPathNoSymlinks rejects a symlinked parent directory', async
 })
 
 test('resolveWorkbenchPaths rejects broad or ambiguous workspace roots', () => {
-  assert.throws(() => resolveWorkbenchPaths('/', { authorityRoot: '/authority/dsh', homePath: '/home/tester' }), /too broad/)
-  assert.throws(() => resolveWorkbenchPaths('/home/tester', { authorityRoot: '/authority/dsh', homePath: '/home/tester' }), /home directory/)
-  assert.throws(() => resolveWorkbenchPaths('relative/path', { authorityRoot: '/authority/dsh', homePath: '/home/tester' }), /absolute/)
-  assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/workspace/lily_ai/authority', homePath: '/home/tester' }), /authorityRoot must be outside workspace/)
-  assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/workspace', homePath: '/home/tester' }), /must not contain workspace/)
+  const options = (authorityRoot) => ({ authorityRoot, homePath: '/home/tester', realpath: (value) => value })
+  assert.throws(() => resolveWorkbenchPaths('/', options('/authority/dsh')), /too broad/)
+  assert.throws(() => resolveWorkbenchPaths('/home/tester', options('/authority/dsh')), /home directory/)
+  assert.throws(() => resolveWorkbenchPaths('relative/path', options('/authority/dsh')), /absolute/)
+  assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', options('/workspace/lily_ai/authority')), /authorityRoot must be outside workspace/)
+  assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', options('/workspace')), /must not contain workspace/)
   assert.throws(() => assertAuthorityRootOutsideSandboxTemp('/tmp/evolution-authority', { temporaryRoot: '/tmp', realpath: (value) => value }), /temporary directory/)
   assert.throws(() => assertAuthorityRootOutsideSandboxTemp('/private/tmp/evolution-authority', {
     temporaryRoots: ['/tmp', '/private/tmp', '/var/tmp'], realpath: (value) => value,
   }), /temporary directory/)
+})
+
+test('resolveWorkbenchPaths rejects a symlinked workspace alias before containment checks', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'evolution-workspace-alias-'))
+  const realWorkspace = join(root, 'real-workspace')
+  const workspaceAlias = join(root, 'workspace-alias')
+  const authorityRoot = join(realWorkspace, 'authority')
+  await mkdir(authorityRoot, { recursive: true })
+  await symlink(realWorkspace, workspaceAlias)
+
+  assert.throws(
+    () => resolveWorkbenchPaths(workspaceAlias, { authorityRoot }),
+    /workspace must not be a symlink or aliased path/,
+  )
 })
 
 test('assertContainedRegularFile accepts a real file inside the root', async () => {

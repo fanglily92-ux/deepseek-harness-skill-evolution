@@ -1,13 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { runDoctor } from '../src/doctor.js'
 
 async function healthyFixture() {
-  const root = await mkdtemp(join(tmpdir(), 'evolution-doctor-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'evolution-doctor-')))
   const workspace = join(root, 'workspace')
   const dshHome = join(root, '.dsh')
   const pluginEntry = join(dshHome, 'plugins', 'deepseek-skill-evolution', '0.1.0', 'index.js')
@@ -37,8 +37,19 @@ test('runDoctor reports stable check ids and passes a healthy isolated fixture',
   assert.equal(result.scope, 'disk-preflight-only')
   assert.equal(result.mountVerified, false)
   assert.deepEqual(result.checks.map((check) => check.id), [
-    'platform', 'node', 'dsh', 'harness-version', 'authority-root', 'plugin-entry', 'preset-disk-config', 'skill', 'project-skill-shadow', 'whitelist', 'ledger', 'ledger-anchor', 'candidate-state', 'versions', 'locks', 'projection-presence',
+    'platform', 'node', 'dsh', 'harness-version', 'workbench-roots', 'authority-root', 'plugin-entry', 'preset-disk-config', 'skill', 'project-skill-shadow', 'whitelist', 'ledger', 'ledger-anchor', 'candidate-state', 'versions', 'locks', 'projection-presence',
   ])
+})
+
+test('runDoctor reports a symlinked workspace alias as unsafe without writing', async () => {
+  const options = await healthyFixture()
+  const realWorkspace = options.workspace
+  const workspaceAlias = join(options.dshHome, '..', 'workspace-alias')
+  await symlink(realWorkspace, workspaceAlias)
+  const result = await runDoctor({ ...options, workspace: workspaceAlias })
+  assert.equal(result.ok, false)
+  assert.equal(result.checks.find((check) => check.id === 'workbench-roots').ok, false)
+  assert.equal(result.checks.find((check) => check.id === 'authority-root').ok, false)
 })
 
 test('runDoctor is read-only and reports a missing preset row without throwing', async () => {

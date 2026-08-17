@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { installerContract } from './installer.js'
-import { assertAuthorityRootOutsideSandboxTemp, assertContainedPathNoSymlinks } from './paths.js'
+import { assertAuthorityRootOutsideSandboxTemp, assertContainedPathNoSymlinks, canonicalWorkbenchRoots } from './paths.js'
 
 async function regularFile(path) {
   try {
@@ -59,6 +59,7 @@ export async function runDoctor(options) {
   const workspace = resolve(options.workspace)
   const authorityRoot = resolve(options.authorityRoot ?? options.dshHome)
   const authorityGuard = options.authorityGuard ?? assertAuthorityRootOutsideSandboxTemp
+  const rootGuard = options.rootGuard ?? canonicalWorkbenchRoots
   const pluginEntry = resolve(options.pluginEntry)
   const presetPath = resolve(options.presetPath)
   const stateRoot = join(authorityRoot, '.skill-evolution-authority', 'state')
@@ -88,7 +89,9 @@ export async function runDoctor(options) {
   const pluginRelation = relative(authorityRoot, pluginEntry)
   let authorityBoundaryOk = false
   try { authorityGuard(authorityRoot); authorityBoundaryOk = true } catch {}
-  const authorityOk = authorityBoundaryOk && pluginRelation !== '' && !pluginRelation.startsWith('..') && !isAbsolute(pluginRelation) && await containedRealPath(authorityRoot, pluginEntry)
+  let workbenchRootsOk = false
+  try { rootGuard(workspace, authorityRoot); workbenchRootsOk = true } catch {}
+  const authorityOk = authorityBoundaryOk && workbenchRootsOk && pluginRelation !== '' && !pluginRelation.startsWith('..') && !isAbsolute(pluginRelation) && await containedRealPath(authorityRoot, pluginEntry)
 
   const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10)
   const checks = [
@@ -96,6 +99,7 @@ export async function runDoctor(options) {
     check('node', nodeMajor >= installerContract.minimumNodeMajor, process.versions.node),
     check('dsh', Boolean(dshVersion), dshVersion ?? 'dsh command unavailable'),
     check('harness-version', dshVersion === installerContract.supportedHarnessVersion, dshVersion ?? 'unknown'),
+    check('workbench-roots', workbenchRootsOk, 'workspace and authority are canonical, disjoint real paths'),
     check('authority-root', authorityOk, authorityRoot),
     check('plugin-entry', await regularFile(pluginEntry), pluginEntry),
     check('preset-disk-config', presetOk, presetPath),
