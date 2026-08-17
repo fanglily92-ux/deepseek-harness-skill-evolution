@@ -142,7 +142,7 @@ $DSH_HOME/plugins/deepseek-skill-evolution/<version>/eval/fixtures/
 
 ## 当前发布门
 
-仓库可以独立审查和运行本地测试，但仍在等待第二次独立复核。维护者不会由此仓库自动创建 GitHub remote、push、安装到真实 `$DSH_HOME` 或宣称真实 Harness 调用已验证。当前真实 stable Skill 已包含模糊批准防线，因此真实 model baseline 可能已经为零；届时候选必须因无严格改善而失败关闭。是否存在可改善 baseline 只能在发布后、经用户另行批准的真实调用门验证，不能由 stub 测试冒充。代码完成、测试通过、独立复核、公开发布、用户批准安装、重启挂载和真实调用是独立门。
+仓库已通过独立 code review（Critical 0、Important 0、Assessment Yes），当前等待维护者最终发布复核与公开发布。维护者不会由此仓库自动创建 GitHub remote、push、安装到真实 `$DSH_HOME` 或宣称真实 Harness 调用已验证。当前真实 stable Skill 已包含模糊批准防线，因此真实 model baseline 可能已经为零；届时候选必须因无严格改善而失败关闭。是否存在可改善 baseline 只能在发布后、经用户另行批准的真实调用门验证，不能由 stub 测试冒充。代码完成、测试通过、独立复核、公开发布、用户批准安装、重启挂载和真实调用是独立门。
 
 ## 第三方说明
 
