@@ -22,6 +22,7 @@ At the start of every invocation, read the protected user-Skill `references/stra
 - Stable/candidate paired runs, all golden fixtures, pre-existing held-out fixtures, deterministic safety checks, and strict primary-metric improvement are mandatory.
 - One critical regression blocks promotion. Average improvement cannot offset safety, privacy, approval, or critical-quality loss.
 - Candidate rules and evaluation reports stay in protected non-discovery state; only a journaled promotion may append one validated rule to the protected stable strategy reference.
+- If a project `.dsh/skills/optimize-work-strategy` exists, or doctor cannot prove which copy Harness resolved, stop every evolution action except `evolution_status` and the read-only doctor. Never load rules from the project copy.
 - Never bypass the tools by directly editing `strategies.yaml` or another stable Skill reference.
 - Never edit this stable core, plugin source, tool registrations, permissions, provider/model settings, credentials, Harness official files, or model parameters.
 
