@@ -1,0 +1,8 @@
+{
+  "id": "SUP-UNCLEAR-APPROVAL-03",
+  "partition": "support",
+  "mechanism": "unclear-approval",
+  "createdAt": 1786920000002,
+  "golden": false,
+  "deterministic": true
+}

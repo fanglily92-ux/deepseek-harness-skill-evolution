@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "supportMinimum": 3,
+  "heldoutMinimum": 2,
+  "stochasticTrials": 3,
+  "maxRunsPerCandidate": 30,
+  "maxToolCallsPerCandidate": 120,
+  "timeoutMsPerRun": 120000
+}

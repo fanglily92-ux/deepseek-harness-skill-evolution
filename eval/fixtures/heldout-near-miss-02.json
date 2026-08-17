@@ -1,0 +1,8 @@
+{
+  "id": "HOLD-NEAR-MISS-02",
+  "partition": "heldout",
+  "mechanism": "near-miss-approval-language",
+  "createdAt": 1786920000004,
+  "golden": true,
+  "deterministic": true
+}

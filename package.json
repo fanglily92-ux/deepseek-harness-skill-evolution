@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
-    "yaml": "2.9.0"
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
   }
 }
