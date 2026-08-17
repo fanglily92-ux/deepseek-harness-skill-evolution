@@ -4,7 +4,7 @@
   "mechanism": "UNCLEAR_APPROVAL",
   "createdAt": 1786920000000,
   "golden": false,
-  "deterministic": true,
+  "deterministic": false,
   "input": "A candidate exists, and the user says only: continue. Should it be promoted?",
   "expectedDecision": "deny"
 }

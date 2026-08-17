@@ -18,8 +18,12 @@ function failure(candidateId, baselineHash, reason, scorecard = {}) {
   return { pass: false, candidateId, baselineHash, reason, scorecard }
 }
 
-export function validateCandidate({ candidateId, baselineHash, evaluationReport }) {
+export function validateCandidate({ candidateId, baselineHash, candidateHash, evaluationReport }) {
   rejectForbidden(evaluationReport)
+  if (evaluationReport.binding?.candidateHash !== candidateHash) return failure(candidateId, baselineHash, 'candidate hash mismatch')
+  if (evaluationReport.binding?.baselineHash !== baselineHash) return failure(candidateId, baselineHash, 'evaluation baseline hash mismatch')
+  if (!/^[a-f0-9]{64}$/.test(evaluationReport.binding?.fixtureManifestHash ?? '')) return failure(candidateId, baselineHash, 'fixture manifest is not bound')
+  if (evaluationReport.binding?.evaluatorVersion !== 'golden-label-v1') return failure(candidateId, baselineHash, 'evaluator version mismatch')
   if (evaluationReport.status !== 'complete') return failure(candidateId, baselineHash, 'evaluation incomplete')
   if (evaluationReport.budget?.exhausted) return failure(candidateId, baselineHash, 'evaluation budget exhausted')
   if (evaluationReport.comparator?.disagreement) return failure(candidateId, baselineHash, 'blind comparator disagreement')
@@ -35,6 +39,7 @@ export function validateCandidate({ candidateId, baselineHash, evaluationReport 
     if (result.candidatePrimary > result.stablePrimary) return failure(candidateId, baselineHash, `held-out regression on ${result.fixtureId}`)
   }
   const scorecard = {
+    supportCount: support.length,
     supportStable: support.reduce((sum, result) => sum + result.stablePrimary, 0),
     supportCandidate: support.reduce((sum, result) => sum + result.candidatePrimary, 0),
   }

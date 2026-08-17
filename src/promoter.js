@@ -3,6 +3,7 @@ import { mkdir, open, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { atomicReplace, sha256, snapshotRegularFile, withExclusiveLock } from './atomic-files.js'
+import { hashCandidateProposal } from './integrity.js'
 import { parseStrategyCatalog, validateStrategyRule } from './strategy-rules.js'
 
 function canonicalJson(value) {
@@ -42,6 +43,11 @@ export async function promoteCandidate({ candidate, validationReport, strategyPa
   if (!validationReport.pass || validationReport.candidateId !== candidate.id) throw new Error('validation report does not approve candidate')
   if (validationReport.reportHash !== candidate.validationReportHash) throw new Error('validation report hash mismatch')
   if (validationReport.baselineHash !== candidate.baselineHash) throw new Error('validation baseline hash mismatch')
+  if (hashCandidateProposal(candidate.proposedRule) !== candidate.candidateHash) throw new Error('candidate content hash mismatch')
+  const expectedCandidateValue = validationReport.scorecard?.supportCandidate / validationReport.scorecard?.supportCount
+  if (!Number.isFinite(expectedCandidateValue) || candidate.proposedRule.candidateValue !== expectedCandidateValue) {
+    throw new Error('candidate metric is not bound to validation scorecard')
+  }
   validateStrategyRule(candidate.proposedRule)
   if (candidate.proposedRule.status !== 'candidate') throw new Error('proposed rule is not a candidate')
 

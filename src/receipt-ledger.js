@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
-import { mkdir, open, readFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { mkdir, open } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
+import { withExclusiveLock } from './atomic-files.js'
 import { assertReceipt, SCHEMA_VERSION } from './contracts.js'
+import { assertContainedPathNoSymlinks } from './paths.js'
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -17,45 +20,45 @@ function hashRow(rowWithoutHash) {
 }
 
 export class ReceiptLedger {
-  #handle
+  #root
   #path
   #tail = Promise.resolve()
-  #lastHash = '0'.repeat(64)
-  #integrityChecked = false
 
-  static async open(paths) {
+  static async open(paths, { create = true } = {}) {
     if (!paths || typeof paths.receipts !== 'string') throw new TypeError('paths.receipts is required')
+    const root = paths.workspace ?? dirname(paths.receipts)
+    await assertContainedPathNoSymlinks(root, paths.receipts, { allowMissingLeaf: create })
     await mkdir(dirname(paths.receipts), { recursive: true })
-    const handle = await open(paths.receipts, 'a+')
-    const ledger = new ReceiptLedger(paths.receipts, handle)
-    const existing = await readFile(paths.receipts, 'utf8')
-    const lines = existing.trimEnd() ? existing.trimEnd().split('\n') : []
-    if (lines.length > 0) {
-      const last = JSON.parse(lines.at(-1))
-      if (typeof last.hash === 'string') ledger.#lastHash = last.hash
-    }
-    return ledger
+    await assertContainedPathNoSymlinks(root, dirname(paths.receipts))
+    const noFollow = constants.O_NOFOLLOW ?? 0
+    const flags = create ? constants.O_CREAT | constants.O_RDWR | constants.O_APPEND | noFollow : constants.O_RDONLY | noFollow
+    const handle = await open(paths.receipts, flags, 0o600)
+    await handle.close()
+    return new ReceiptLedger(root, paths.receipts)
   }
 
-  constructor(path, handle) {
+  constructor(root, path) {
+    this.#root = root
     this.#path = path
-    this.#handle = handle
   }
 
   append(receipt) {
     const operation = this.#tail.then(async () => {
-      if (!this.#integrityChecked) await this.#verifyFile()
       assertReceipt(receipt)
-      const core = {
-        schemaVersion: SCHEMA_VERSION,
-        previousHash: this.#lastHash,
-        payload: receipt,
-      }
-      const hash = hashRow(core)
-      await this.#handle.appendFile(`${JSON.stringify({ ...core, hash })}\n`, 'utf8')
-      await this.#handle.sync()
-      this.#lastHash = hash
-      return hash
+      return withExclusiveLock(`${this.#path}.lock`, async () => {
+        await assertContainedPathNoSymlinks(this.#root, this.#path)
+        const handle = await open(this.#path, constants.O_RDWR | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0))
+        try {
+          const verified = await this.#verifyHandle(handle)
+          const core = { schemaVersion: SCHEMA_VERSION, previousHash: verified.lastHash, payload: receipt }
+          const hash = hashRow(core)
+          await handle.appendFile(`${JSON.stringify({ ...core, hash })}\n`, 'utf8')
+          await handle.sync()
+          return hash
+        } finally {
+          await handle.close()
+        }
+      }, { waitMs: 2000 })
     })
     this.#tail = operation.catch(() => undefined)
     return operation
@@ -63,11 +66,38 @@ export class ReceiptLedger {
 
   async verify() {
     await this.#tail
-    return this.#verifyFile()
+    return withExclusiveLock(`${this.#path}.lock`, async () => {
+      await assertContainedPathNoSymlinks(this.#root, this.#path)
+      const handle = await open(this.#path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+      try {
+        return await this.#verifyHandle(handle)
+      } finally {
+        await handle.close()
+      }
+    }, { waitMs: 2000 })
   }
 
-  async #verifyFile() {
-    const content = await readFile(this.#path, 'utf8')
+  async readPayloads() {
+    await this.#tail
+    return withExclusiveLock(`${this.#path}.lock`, async () => {
+      await assertContainedPathNoSymlinks(this.#root, this.#path)
+      const handle = await open(this.#path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+      try {
+        const content = await handle.readFile('utf8')
+        this.#verifyContent(content)
+        return content.trimEnd() ? content.trimEnd().split('\n').map((line) => JSON.parse(line).payload) : []
+      } finally {
+        await handle.close()
+      }
+    }, { waitMs: 2000 })
+  }
+
+  async #verifyHandle(handle) {
+    const content = await handle.readFile('utf8')
+    return this.#verifyContent(content)
+  }
+
+  #verifyContent(content) {
     const lines = content.trimEnd() ? content.trimEnd().split('\n') : []
     let previousHash = '0'.repeat(64)
     for (let index = 0; index < lines.length; index += 1) {
@@ -88,13 +118,10 @@ export class ReceiptLedger {
       }
       previousHash = row.hash
     }
-    this.#integrityChecked = true
-    this.#lastHash = previousHash
     return { ok: true, count: lines.length, lastHash: previousHash }
   }
 
   async close() {
     await this.#tail
-    await this.#handle.close()
   }
 }

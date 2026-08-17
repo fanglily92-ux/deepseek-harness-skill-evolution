@@ -50,3 +50,26 @@ export async function assertContainedRegularFile(root, target) {
   }
   return resolvedTarget
 }
+
+export async function assertContainedPathNoSymlinks(root, target, { allowMissingLeaf = false } = {}) {
+  const resolvedRoot = resolve(root)
+  const resolvedTarget = resolve(target)
+  assertContained(resolvedRoot, resolvedTarget)
+  const rootStat = await lstat(resolvedRoot)
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error(`workspace root must be a real directory: ${resolvedRoot}`)
+  const parts = relative(resolvedRoot, resolvedTarget).split(process.platform === 'win32' ? '\\' : '/').filter(Boolean)
+  let cursor = resolvedRoot
+  for (let index = 0; index < parts.length; index += 1) {
+    cursor = join(cursor, parts[index])
+    let stat
+    try {
+      stat = await lstat(cursor)
+    } catch (error) {
+      if (error.code === 'ENOENT' && (allowMissingLeaf || index < parts.length - 1)) return resolvedTarget
+      throw error
+    }
+    if (stat.isSymbolicLink()) throw new Error(`path component must not be a symlink: ${cursor}`)
+    if (index < parts.length - 1 && !stat.isDirectory()) throw new Error(`path parent must be a directory: ${cursor}`)
+  }
+  return resolvedTarget
+}

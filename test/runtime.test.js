@@ -62,13 +62,15 @@ test('default runtime validation fails closed when no paired evaluator is config
   const validation = await services.validate({ candidate_id: proposal.candidateId })
   assert.equal(validation.status, 'inconclusive')
   assert.equal(validation.stableChanged, false)
+  await assert.rejects(services.validate({ candidate_id: proposal.candidateId }), /not awaiting validation/)
   await assert.rejects(services.promote({ candidate_id: proposal.candidateId }), /awaiting approval/)
 })
 
 test('runtime promotes only a fully validated candidate and advances stable by one append', async () => {
   const setup = await fixture()
-  const evaluator = async () => ({
+  const evaluator = async (candidate) => ({
     status: 'complete', budget: { exhausted: false }, comparator: { disagreement: false }, allGoldenIncluded: true,
+    binding: { candidateHash: candidate.candidateHash, baselineHash: candidate.baselineHash, fixtureManifestHash: 'c'.repeat(64), evaluatorVersion: 'golden-label-v1' },
     fixtureResults: [
       ...[1, 2, 3].map((id) => ({ fixtureId: `SUP-${id}`, partition: 'support', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 1, candidatePrimary: 0 })),
       ...[1, 2].map((id) => ({ fixtureId: `HOLD-${id}`, partition: 'heldout', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 0, candidatePrimary: 0 })),
@@ -89,4 +91,24 @@ test('runtime promotes only a fully validated candidate and advances stable by o
   assert.equal(stable.stableVersion, 1)
   assert.equal(stable.rules.length, 1)
   assert.equal(stable.rules[0].status, 'stable')
+})
+
+test('runtime blocks evolution when observer health is degraded', async () => {
+  const setup = await fixture()
+  const services = createRuntimeServices({ workspace: setup.workspace, observerHealth: { status: 'degraded', lastErrorCode: 'EIO' } })
+  await assert.rejects(services.review({ case_ids: setup.caseIds }), /observer unavailable: EIO/)
+})
+
+test('runtime does not propose mechanisms without predeclared evaluation coverage', async () => {
+  const setup = await fixture()
+  const text = await readFile(setup.paths.receipts, 'utf8')
+  const rows = text.trimEnd().split('\n').map((line) => JSON.parse(line))
+  for (const row of rows) row.payload.evidence.errorClass = 'REWORK'
+  // Rebuild through the public ledger contract so hashes remain valid.
+  await writeFile(setup.paths.receipts, '')
+  const ledger = await ReceiptLedger.open(setup.paths)
+  for (const row of rows) await ledger.append(row.payload)
+  await ledger.close()
+  const services = createRuntimeServices({ workspace: setup.workspace })
+  await assert.rejects(services.review({ case_ids: setup.caseIds }), /no predeclared evaluation coverage/)
 })

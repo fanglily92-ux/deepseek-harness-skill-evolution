@@ -12,6 +12,7 @@ export const CANDIDATE_STATES = Object.freeze([
   'rolled-back',
   'stale',
 ])
+export const EVOLVABLE_FAILURE_MECHANISMS = Object.freeze(['UNCLEAR_APPROVAL'])
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const CASE_ID_PATTERN = /^CASE-[a-f0-9]{16}$/
@@ -71,7 +72,7 @@ export function assertCandidate(candidate) {
   }
   assertExactFields(
     candidate,
-    new Set(['schemaVersion', 'id', 'skillName', 'state', 'baselineHash', 'proposedRule', 'caseIds', 'createdAt']),
+    new Set(['schemaVersion', 'id', 'skillName', 'state', 'baselineHash', 'candidateHash', 'validationAttempts', 'proposedRule', 'caseIds', 'createdAt']),
     'candidate',
   )
   if (candidate.schemaVersion !== SCHEMA_VERSION) throw new Error('unsupported candidate schemaVersion')
@@ -79,6 +80,8 @@ export function assertCandidate(candidate) {
   if (typeof candidate.skillName !== 'string' || candidate.skillName.length === 0) throw new Error('invalid candidate skillName')
   if (!CANDIDATE_STATES.includes(candidate.state)) throw new Error('invalid candidate state')
   if (!SHA256_PATTERN.test(candidate.baselineHash)) throw new Error('invalid candidate baselineHash')
+  if (!SHA256_PATTERN.test(candidate.candidateHash)) throw new Error('invalid candidate candidateHash')
+  if (!Number.isInteger(candidate.validationAttempts) || candidate.validationAttempts < 0) throw new Error('invalid candidate validationAttempts')
   if (!candidate.proposedRule || typeof candidate.proposedRule !== 'object' || Array.isArray(candidate.proposedRule)) throw new Error('invalid candidate proposedRule')
   if (!Array.isArray(candidate.caseIds) || candidate.caseIds.length < 3) throw new Error('candidate requires at least three independent case ids')
   if (new Set(candidate.caseIds).size !== candidate.caseIds.length || candidate.caseIds.some((id) => !CASE_ID_PATTERN.test(id))) {

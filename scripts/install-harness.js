@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { installHarness, planInstall } from '../src/installer.js'
+import { detectHarnessVersion, installHarness, planInstall } from '../src/installer.js'
 
 function usage() {
   return [
@@ -41,7 +41,7 @@ async function main() {
     dshHome,
     pluginEntry: resolve(args['plugin-entry'] ?? join(scriptRoot, 'index.js')),
     presetPath: join(dshHome, '.agent-presets', 'video-reader', 'agent.cordis.yml'),
-    harnessVersion: '0.1.0-rc.6',
+    harnessVersion: detectHarnessVersion(),
     nodeVersion: process.versions.node,
   }
   if (!args.apply) {

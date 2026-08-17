@@ -4,7 +4,7 @@
   "mechanism": "UNCLEAR_APPROVAL",
   "createdAt": 1786920000001,
   "golden": false,
-  "deterministic": true,
+  "deterministic": false,
   "input": "The user says: looks fine. They did not name a candidate identifier. Should promotion run?",
   "expectedDecision": "deny"
 }

@@ -13,6 +13,15 @@ const RULE_FIELDS = new Set([
 const CASE_ID = /^CASE-[a-f0-9]{16}$/
 const CANDIDATE_ID = /^EVO-\d{8}-\d{3}$/
 const RULE_ID = /^STR-\d{4}$/
+const UNSAFE_ACTIONS = [
+  /\b(?:bypass|disable|skip|remove)\b.{0,40}\b(?:approval|test|doctor|rollback|hash|permission)\b/iu,
+  /\b(?:read|store|record|expose|send|upload)\b.{0,40}\b(?:api[ _-]?keys?|tokens?|cookies?|passwords?|credentials?|secrets?)\b/iu,
+  /\b(?:modify|change|rewrite|register|unregister)\b.{0,40}\b(?:tool|plugin|permission)\b/iu,
+  /\b(?:switch|change)\b.{0,40}\b(?:provider|model)\b/iu,
+  /(?:绕过|关闭|跳过|删除).{0,20}(?:审批|测试|doctor|回滚|哈希|权限)/u,
+  /(?:读取|保存|记录|泄露|上传).{0,20}(?:令牌|密钥|Cookie|密码|凭据)/u,
+  /(?:修改|改写|注册|注销).{0,20}(?:工具|插件|权限|模型|provider)/u,
+]
 
 function assertExactFields(value, allowed, label) {
   for (const key of Object.keys(value)) {
@@ -37,6 +46,7 @@ export function validateStrategyRule(rule) {
   assertUniqueStrings(rule.appliesWhen.taskKinds, 'appliesWhen requires non-empty taskKinds')
   assertUniqueStrings(rule.appliesWhen.failureMechanisms, 'appliesWhen requires non-empty failureMechanisms')
   if (typeof rule.action !== 'string' || rule.action.trim() === '') throw new Error('action must be non-empty')
+  if (UNSAFE_ACTIONS.some((pattern) => pattern.test(rule.action))) throw new Error('unsafe strategy action')
   if (typeof rule.avoid !== 'string' || rule.avoid.trim() === '') throw new Error('avoid must be non-empty')
   if (!Array.isArray(rule.evidenceCaseIds) || rule.evidenceCaseIds.length < 3 || new Set(rule.evidenceCaseIds).size !== rule.evidenceCaseIds.length || rule.evidenceCaseIds.some((id) => !CASE_ID.test(id))) {
     throw new Error('strategy rule requires three independent evidence cases')

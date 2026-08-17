@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   classifyDirectUserSignal,
+  classifyPromotionApproval,
   safeEventSummary,
 } from '../src/redaction.js'
 
@@ -13,6 +14,12 @@ test('classifyDirectUserSignal detects a correction without returning its text',
 
   assert.equal(result, 'negative')
   assert.equal(JSON.stringify(result).includes('secret'), false)
+})
+
+test('classifyPromotionApproval requires approval language and an exact candidate id', () => {
+  assert.equal(classifyPromotionApproval([{ type: 'text', text: '继续' }]), 'generic')
+  assert.equal(classifyPromotionApproval([{ type: 'text', text: '批准 EVO-20260818-001' }]), 'exact')
+  assert.equal(classifyPromotionApproval([{ type: 'text', text: '拒绝 EVO-20260818-001' }]), 'none')
 })
 
 test('classifyDirectUserSignal treats mixed approval and correction as ambiguous', () => {

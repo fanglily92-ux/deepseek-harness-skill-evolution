@@ -46,3 +46,11 @@ test('plugin asks for one-time approval only for the exact promotion call', () =
   )
   assert.deepEqual(gate({ name: 'evolution_status', arguments: {} }, next), { kind: 'allow' })
 })
+
+test('plugin denies obvious non-evolution writes to authority files as defense in depth', () => {
+  const ctx = fakeContext()
+  apply(ctx, { services, workspace: '/tmp/evolution-workspace' })
+  const gate = ctx.listeners.get('tools/pre-execute')
+  const result = gate({ name: 'bash', arguments: { command: 'printf x > .dsh/skills/optimize-work-strategy/references/strategies.yaml' } }, () => ({ kind: 'allow' }))
+  assert.deepEqual(result, { kind: 'deny', reason: 'Authority state may be changed only through evolution tools.' })
+})

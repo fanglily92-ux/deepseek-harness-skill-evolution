@@ -14,9 +14,9 @@ This repository contains an independent Node.js implementation. It does not copy
 
 The isolation rule was also informed by [Anthropic Skills issue #1260](https://github.com/anthropics/skills/issues/1260), which describes candidate files becoming visible through a live command-discovery directory. This project keeps candidates outside Skill discovery roots.
 
-## Runtime dependencies
+## Compatibility references
 
-- `@deepseek-ai/dsh-tools@0.1.0-rc.6` — MIT; official DeepSeek Harness tool contract.
-- `@deepseek-ai/dsh-agent-presets@0.1.0-rc.6` — MIT; official DeepSeek Harness preset contract used for compatibility verification.
+- `@deepseek-ai/dsh-tools@0.1.0-rc.6` — MIT; its public tool shape was inspected during compatibility work, but it is not imported or shipped.
+- `@deepseek-ai/dsh-agent-presets@0.1.0-rc.6` — MIT; its public preset contract was inspected during compatibility work, but it is not imported or shipped.
 
-All resolved package licenses are checked from `package-lock.json` with `npm run check:licenses`. This notice is not legal advice; the upstream license files remain authoritative.
+The runtime dependency set is empty. `package-lock.json` and the runtime import graph are still checked at the release gate. This notice is not legal advice; the upstream license files remain authoritative.

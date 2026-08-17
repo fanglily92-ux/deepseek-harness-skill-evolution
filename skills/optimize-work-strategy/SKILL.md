@@ -5,28 +5,35 @@ description: Use when a whitelisted DeepSeek Harness Skill receives repeated use
 
 # Optimize Work Strategy
 
-Turn repeated, verified failures into narrow strategy candidates without letting a proposal modify the stable Skill. Reflection fixes the current task; self-evolution additionally identifies the root cause, records reusable experience, evaluates a policy update, and changes later execution only after every gate passes.
+## Overview
+
+Turn repeated, verified failures into narrow strategy candidates without letting a proposal modify the stable Skill. Reflection fixes the current task; self-evolution additionally identifies the root cause, records reusable experience, evaluates a policy update, and changes later execution only after every gate passes. Reflection proposes; paired evidence evaluates; the user decides; the plugin enforces every gate.
+
+## Apply stable experience
+
+At the start of every invocation, read `references/strategies.yaml`. Apply only `stable` rules whose `appliesWhen` conditions match the current task. Treat an unreadable, invalid, candidate-status, or ambiguous rule as unavailable and keep the hard invariants in this file. Never infer a broader scope than the rule declares.
 
 ## Hard invariants
 
 - Stable is the default. Missing, conflicting, timed-out, quota-blocked, or subjective-only evidence means no promotion.
 - Three independent `CASE-*` receipts are the minimum to propose, not proof that a candidate is better.
-- Independent cases must have distinct case IDs, session hashes, and turn coordinates.
+- “Independent” means distinct case ID, session hash, and turn coordinates; one failure split into multiple rows still counts once.
+- Select the failure mechanism from the plugin's predeclared taxonomy and require matching structured evidence. Ambiguous, mixed, or model-inferred-only classification stays in observation and cannot count toward the three-case threshold; the plugin must enforce this deterministically.
 - Stable/candidate paired runs, all golden fixtures, pre-existing held-out fixtures, deterministic safety checks, and strict primary-metric improvement are mandatory.
 - One critical regression blocks promotion. Average improvement cannot offset safety, privacy, approval, or critical-quality loss.
-- Candidate material stays outside every Harness Skill discovery directory until atomic promotion.
-- Never bypass the tools by directly editing `strategies.yaml`.
-- Never edit plugin source, tool registrations, permissions, provider/model settings, credentials, Harness official files, or model parameters.
+- Candidate material stays outside `.dsh/skills/`, `.agents/skills/`, `~/.dsh/skills/`, and `~/.agents/skills/` until an atomic promotion.
+- Never bypass the tools by directly editing `strategies.yaml` or another stable Skill reference.
+- Never edit this stable core, plugin source, tool registrations, permissions, provider/model settings, credentials, Harness official files, or model parameters.
 
 ## Workflow
 
-1. Call `evolution_status`. Stop if health or ledger integrity is degraded.
-2. Call `evolution_review` with at least three independent receipt IDs for the same deterministic failure mechanism.
-3. Call `evolution_propose` for one narrow, non-overlapping rule and precommit a lower-is-better primary metric before viewing candidate results.
-4. Call `evolution_validate`. Stable and candidate must use identical model, provider, tools, permissions, input, and budget. `inconclusive`, tie, disagreement, omitted golden cases, or any regression means no update.
-5. Show the exact `EVO-*` candidate, bounded diff, support/held-out results, guardrails, cost, uncertainty, and rollback condition.
-6. Do not call `evolution_promote` until the user explicitly approves that exact `EVO-*` identifier in the current task. Generic continuation language is not approval.
-7. Pass only `candidate_id` to `evolution_promote`. The promoter rechecks ledger integrity, validation hash, baseline hash, lock, backup, and postcondition. Harness's `tools/pre-execute` prompt is the final execution gate.
+1. Call `evolution_status` before any mutating tool. Stop if health or ledger integrity is degraded.
+2. Call `evolution_review` only with at least three independent receipt IDs for the same failure mechanism. Keep unknown, duplicate, or contradictory cases in observation.
+3. Call `evolution_propose` once for one narrow, non-overlapping mechanism. Lock the lower-is-better primary metric before any candidate result is visible; do not switch metrics after evaluation or generalize beyond the evidence scope.
+4. Call `evolution_validate`. The plugin must compare stable and candidate under identical model, provider, tools, permissions, input, and budget. Treat `inconclusive`, tie, disagreement, omitted golden cases, or any regression as failure.
+5. Show the generated `EVO-*` approval card: exact diff, content/baseline/report hashes, support and held-out results, guardrails, cost, uncertainty, and rollback condition.
+6. Do not call `evolution_promote` until the user explicitly approves that exact `EVO-*` identifier in the current task. “可以”“继续”“通过” without the identifier is not promotion approval.
+7. Pass only `candidate_id` to `evolution_promote`. The promoter must recheck ledger integrity, candidate content hash, fixture/evaluator binding, validation hash, baseline hash, lock, backup, and postcondition because state may have changed after `evolution_status`. Harness's mounted `tools/pre-execute` approval prompt is the final one-time execution gate; if doctor has not proved the hook is mounted, stop. Never simulate or bypass it.
 8. Report code completion, tests, installation, Harness mounting, real-call validation, promotion, observation, quarantine, and rollback as separate states.
 
 ## V1 layer boundary
@@ -39,4 +46,6 @@ Turn repeated, verified failures into narrow strategy candidates without letting
 
 ## Stop conditions
 
-Keep stable when there are fewer than three cases, no pre-existing held-out/golden coverage, a stale baseline, an unknown lock, a budget failure, comparator disagreement, or an unverified critical result. Model self-evaluation and one reflection never constitute self-evolution.
+Stop and keep stable when there are fewer than three cases, no pre-existing held-out/golden coverage, a stale baseline hash, an unknown lock, an evaluation budget failure, comparator disagreement, or an unverified critical result. Model self-evaluation and one reflection never constitute self-evolution.
+
+“We can roll back later,” “it is only a small append,” “the proposer says it is better,” and “the user is in a hurry” never replace pre-promotion evidence or exact approval.

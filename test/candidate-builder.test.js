@@ -48,6 +48,8 @@ test('buildCandidate binds the proposal to a deterministic baseline hash and id'
 
   assert.equal(candidate.id, 'EVO-20260817-001')
   assert.match(candidate.baselineHash, /^[a-f0-9]{64}$/)
+  assert.match(candidate.candidateHash, /^[a-f0-9]{64}$/)
+  assert.equal(candidate.validationAttempts, 0)
   assert.deepEqual(candidate.caseIds, caseIds)
   assert.equal(candidate.state, 'awaiting-validation')
 })

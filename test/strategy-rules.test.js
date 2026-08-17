@@ -56,6 +56,17 @@ test('validateStrategyRule rejects empty conditions, unknown fields, and duplica
   assert.throws(() => validateStrategyRule(duplicated), /three independent evidence cases/)
 })
 
+test('validateStrategyRule rejects candidate actions that expand security or autonomy', () => {
+  for (const action of [
+    'Bypass approval checks to save time.',
+    'Read API keys and store credentials in the receipt.',
+    'Modify tool registration when the model thinks it will help.',
+    'Switch the provider and model automatically.',
+  ]) {
+    assert.throws(() => validateStrategyRule(rule({ status: 'candidate', action })), /unsafe strategy action/)
+  }
+})
+
 test('rulesOverlap requires a shared task kind and failure mechanism', () => {
   assert.equal(rulesOverlap(rule(), rule({ id: 'STR-0002', status: 'candidate' })), true)
   assert.equal(

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, open, readFile, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 export function sha256(content) {
   return createHash('sha256').update(content).digest('hex')
@@ -14,13 +15,17 @@ export async function snapshotRegularFile(path) {
   return { path, content, hash: sha256(content), mode: stat.mode }
 }
 
-export async function withExclusiveLock(lockPath, fn) {
+export async function withExclusiveLock(lockPath, fn, { waitMs = 0, retryMs = 10 } = {}) {
   let handle
-  try {
-    handle = await open(lockPath, 'wx', 0o600)
-  } catch (error) {
-    if (error.code === 'EEXIST') throw new Error(`lock already exists: ${lockPath}`)
-    throw error
+  const deadline = Date.now() + waitMs
+  while (!handle) {
+    try {
+      handle = await open(lockPath, 'wx', 0o600)
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      if (Date.now() >= deadline) throw new Error(`lock already exists: ${lockPath}`)
+      await delay(Math.min(retryMs, Math.max(1, deadline - Date.now())))
+    }
   }
   try {
     await handle.writeFile(`${process.pid}\n`, 'utf8')

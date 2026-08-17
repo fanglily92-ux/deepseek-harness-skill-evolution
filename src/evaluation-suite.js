@@ -25,7 +25,7 @@ export function buildEvaluationSuite({ candidate, fixtureRegistry, policy }) {
   return Object.freeze({ candidateId: candidate.id, support: structuredClone(support), heldout: structuredClone(heldout), policy: structuredClone(policy) })
 }
 
-export async function runPairedEvaluation({ suite, environment, budget, runArm }) {
+export async function runPairedEvaluation({ suite, environment, budget, runArm, firstArm = () => Math.random() < 0.5 ? 'stable' : 'candidate' }) {
   if (typeof runArm !== 'function') throw new Error('runArm is required')
   const fixtures = [...suite.support, ...suite.heldout]
   const plannedRuns = fixtures.reduce((total, fixture) => total + (fixture.deterministic ? 2 : suite.policy.stochasticTrials * 2), 0)
@@ -36,8 +36,13 @@ export async function runPairedEvaluation({ suite, environment, budget, runArm }
       const trials = fixture.deterministic ? 1 : suite.policy.stochasticTrials
       for (let trial = 1; trial <= trials; trial += 1) {
         const common = { fixture: structuredClone(fixture), trial, environment: structuredClone(environment), budget: structuredClone(budget) }
-        const stable = await runArm({ ...common, arm: 'stable' })
-        const candidate = await runArm({ ...common, arm: 'candidate' })
+        const first = firstArm({ fixture: structuredClone(fixture), trial })
+        if (!['stable', 'candidate'].includes(first)) throw new Error('firstArm must return stable or candidate')
+        const second = first === 'stable' ? 'candidate' : 'stable'
+        const results = {}
+        results[first] = await runArm({ ...common, arm: first })
+        results[second] = await runArm({ ...common, arm: second })
+        const { stable, candidate } = results
         fixtureResults.push({ fixtureId: fixture.id, partition: fixture.partition, golden: fixture.golden, trial, stable, candidate })
       }
     }

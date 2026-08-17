@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -40,6 +40,27 @@ test('ReceiptLedger serializes concurrent appends into a valid hash chain', asyn
   assert.equal(result.ok, true)
   assert.equal(result.count, 3)
   assert.match(result.lastHash, /^[a-f0-9]{64}$/)
+})
+
+test('two ReceiptLedger instances serialize appends through the filesystem lock', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'evolution-ledger-'))
+  const paths = { workspace: root, receipts: join(root, 'receipts.jsonl') }
+  const first = await ReceiptLedger.open(paths)
+  const second = await ReceiptLedger.open(paths)
+  await Promise.all([first.append(receipt(1)), second.append(receipt(2))])
+  const result = await first.verify()
+  await Promise.all([first.close(), second.close()])
+  assert.equal(result.count, 2)
+})
+
+test('ReceiptLedger refuses a symlink leaf instead of writing through it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'evolution-ledger-'))
+  const outside = join(await mkdtemp(join(tmpdir(), 'evolution-outside-')), 'outside.jsonl')
+  await writeFile(outside, '')
+  const receipts = join(root, 'receipts.jsonl')
+  await symlink(outside, receipts)
+  await assert.rejects(ReceiptLedger.open({ workspace: root, receipts }), /symlink|ELOOP/)
+  assert.equal(await readFile(outside, 'utf8'), '')
 })
 
 test('ReceiptLedger detects corruption in the middle of the chain', async () => {

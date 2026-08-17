@@ -1,4 +1,3 @@
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -8,6 +7,7 @@ import { createEventObserver } from './src/event-observer.js'
 import { ReceiptLedger } from './src/receipt-ledger.js'
 import { resolveWorkbenchPaths } from './src/paths.js'
 import { createHarnessEvaluator } from './src/harness-evaluator.js'
+import { defineEvolutionTool } from './src/tool-definition.js'
 
 export const name = 'deepseek-skill-evolution'
 export const inject = ['tools', 'agents', 'agentPresets']
@@ -17,18 +17,31 @@ export function apply(ctx, config = {}) {
     throw new Error('deepseek-skill-evolution requires an absolute workspace path')
   }
   const pluginRoot = dirname(fileURLToPath(import.meta.url))
+  const observerHealth = { status: config.workspace ? 'initializing' : 'healthy', lastErrorCode: null, lastSuccessSeq: null }
   const evaluator = config.evaluator ?? (config.workspace ? createHarnessEvaluator({
     ctx,
     workspace: config.workspace,
     fixturesDirectory: join(pluginRoot, 'eval', 'fixtures'),
     policyPath: join(pluginRoot, 'config', 'evaluation-policy.json'),
   }) : undefined)
-  const services = config.services ?? createRuntimeServices({ workspace: config.workspace, evaluator })
+  const services = config.services ?? createRuntimeServices({ workspace: config.workspace, evaluator, observerHealth })
   const disposers = []
-  for (const tool of createEvolutionTools({ defineTool, services })) {
+  for (const tool of createEvolutionTools({ defineTool: defineEvolutionTool, services })) {
     disposers.push(ctx.tools.register(tool))
   }
   disposers.push(ctx.on('tools/pre-execute', (exec, next) => {
+    if (config.workspace && !exec.name.startsWith('evolution_')) {
+      const serialized = JSON.stringify(exec.arguments ?? {}).replaceAll('\\', '/')
+      const protectedFragments = [
+        '.dsh/skills/optimize-work-strategy/references/strategies.yaml',
+        'logs/DeepSeek-Harness自进化/state/receipts.jsonl',
+        'logs/DeepSeek-Harness自进化/state/candidates.json',
+        'logs/DeepSeek-Harness自进化/state/versions.jsonl',
+      ]
+      if (protectedFragments.some((fragment) => serialized.includes(fragment))) {
+        return { kind: 'deny', reason: 'Authority state may be changed only through evolution tools.' }
+      }
+    }
     if (exec.name !== 'evolution_promote') return next()
     const candidateId = exec.arguments?.candidate_id
     return {
@@ -49,8 +62,14 @@ export function apply(ctx, config = {}) {
           ledgerPromise,
           readWhitelist(join(pluginRoot, 'config', 'whitelist.json')),
         ]).then(([ledger, whitelist]) => createEventObserver({ ledger, whitelist }))
-        return await (await observerPromise)(session, event)
-      } catch {
+        const result = await (await observerPromise)(session, event)
+        observerHealth.status = 'healthy'
+        observerHealth.lastErrorCode = null
+        observerHealth.lastSuccessSeq = Number.isFinite(event?.seq) ? event.seq : observerHealth.lastSuccessSeq
+        return result
+      } catch (error) {
+        observerHealth.status = 'degraded'
+        observerHealth.lastErrorCode = typeof error?.code === 'string' ? error.code : 'OBSERVER_ERROR'
         return undefined
       }
     }

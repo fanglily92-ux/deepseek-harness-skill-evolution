@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { hashCatalog, promoteCandidate } from '../src/promoter.js'
+import { hashCandidateProposal } from '../src/integrity.js'
 
 function proposedRule() {
   return {
@@ -30,10 +31,10 @@ async function setup() {
 
 test('promoteCandidate atomically appends one stable rule, backup, and version row', async () => {
   const paths = await setup()
-  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64) }
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
   const candidate = {
     id: 'EVO-20260817-001', state: 'awaiting-approval', baselineHash: hashCatalog(paths.catalog),
-    validationReportHash: validationReport.reportHash, proposedRule: proposedRule(),
+    validationReportHash: validationReport.reportHash, proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()),
   }
 
   const result = await promoteCandidate({ ...paths, candidate, validationReport, now: () => 1786924800000 })
@@ -48,7 +49,7 @@ test('promoteCandidate atomically appends one stable rule, backup, and version r
 
 test('promoteCandidate rejects a stale validation hash before writing', async () => {
   const paths = await setup()
-  const candidate = { id: 'EVO-20260817-001', state: 'awaiting-approval', baselineHash: hashCatalog(paths.catalog), validationReportHash: 'a'.repeat(64), proposedRule: proposedRule() }
+  const candidate = { id: 'EVO-20260817-001', state: 'awaiting-approval', baselineHash: hashCatalog(paths.catalog), validationReportHash: 'a'.repeat(64), proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()) }
   const validationReport = { pass: true, candidateId: candidate.id, baselineHash: candidate.baselineHash, reportHash: 'b'.repeat(64) }
 
   await assert.rejects(promoteCandidate({ ...paths, candidate, validationReport, now: () => 1 }), /validation report hash mismatch/)
@@ -58,9 +59,18 @@ test('promoteCandidate rejects a stale validation hash before writing', async ()
 test('promoteCandidate restores the old catalog if the version ledger cannot commit', async () => {
   const paths = await setup()
   await mkdir(paths.versionsPath)
-  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64) }
-  const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: proposedRule() }
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
+  const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()) }
 
   await assert.rejects(promoteCandidate({ ...paths, candidate, validationReport, now: () => 1 }))
+  assert.deepEqual(JSON.parse(await readFile(paths.strategyPath, 'utf8')), paths.catalog)
+})
+
+test('promoteCandidate rejects a proposal changed after validation', async () => {
+  const paths = await setup()
+  const original = proposedRule()
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
+  const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: { ...original, action: 'Changed after validation.' }, candidateHash: hashCandidateProposal(original) }
+  await assert.rejects(promoteCandidate({ ...paths, candidate, validationReport }), /candidate content hash mismatch/)
   assert.deepEqual(JSON.parse(await readFile(paths.strategyPath, 'utf8')), paths.catalog)
 })

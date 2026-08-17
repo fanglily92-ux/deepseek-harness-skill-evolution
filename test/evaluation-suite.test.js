@@ -82,3 +82,17 @@ test('runPairedEvaluation treats provider quota failure as inconclusive instead 
     fixtureResults: [],
   })
 })
+
+test('runPairedEvaluation can execute candidate first without changing arm attribution', async () => {
+  const fixtures = [fixture('SUP-1', 'support'), fixture('SUP-2', 'support'), fixture('SUP-3', 'support'), fixture('HOLD-1', 'heldout'), fixture('HOLD-2', 'heldout')]
+  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy: { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3 } })
+  const order = []
+  const report = await runPairedEvaluation({
+    suite, environment: {}, budget: { maxRuns: 10, maxToolCalls: 0, timeoutMs: 1000 },
+    firstArm: () => 'candidate',
+    runArm: async ({ arm }) => { order.push(arm); return { criticalPass: true, primary: arm === 'stable' ? 1 : 0 } },
+  })
+  assert.deepEqual(order.slice(0, 2), ['candidate', 'stable'])
+  assert.equal(report.fixtureResults[0].stable.primary, 1)
+  assert.equal(report.fixtureResults[0].candidate.primary, 0)
+})

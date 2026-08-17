@@ -95,6 +95,8 @@ test('assertCandidate requires an exact state, baseline hash, and independent ca
     skillName: 'optimize-work-strategy',
     state: 'awaiting-validation',
     baselineHash: 'b'.repeat(64),
+    candidateHash: 'c'.repeat(64),
+    validationAttempts: 0,
     proposedRule: { id: 'rule-001' },
     caseIds: [
       'CASE-0123456789abcdef',

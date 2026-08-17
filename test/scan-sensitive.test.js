@@ -14,7 +14,9 @@ test('sensitive scan passes clean source and detects credentials, private keys, 
 
   const personalPath = ['/Us', 'ers/example/private.txt'].join('')
   const credential = ['OPENAI_API_', 'KEY=sk-example-value'].join('')
-  await writeFile(join(root, 'src', 'bad.js'), `${personalPath}\n${credential}\n-----BEGIN ${'PRIVATE KEY'}-----\n`)
+  const credentialUrl = ['https://user', ':password@example.invalid'].join('')
+  const npmToken = ['_auth', 'Token=secret-value'].join('')
+  await writeFile(join(root, 'src', 'bad.js'), `${personalPath}\n${credential}\n-----BEGIN RSA ${'PRIVATE KEY'}-----\n${credentialUrl}\n${npmToken}\n`)
   const findings = await scanSensitiveFiles(root)
-  assert.deepEqual(new Set(findings.map((item) => item.rule)), new Set(['absolute-user-path', 'credential-assignment', 'private-key']))
+  assert.deepEqual(new Set(findings.map((item) => item.rule)), new Set(['absolute-user-path', 'credential-assignment', 'private-key', 'credential-url', 'npm-auth-token']))
 })

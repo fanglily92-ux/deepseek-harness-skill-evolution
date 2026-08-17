@@ -28,9 +28,5 @@
     "scan:sensitive": "node scripts/scan-sensitive.js",
     "check:licenses": "node scripts/check-licenses.js",
     "release:check": "npm test && npm run check && npm run scan:sensitive && npm run check:licenses"
-  },
-  "dependencies": {
-    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
   }
 }

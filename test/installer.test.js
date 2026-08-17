@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { installHarness, planInstall } from '../src/installer.js'
+import { detectHarnessVersion, installHarness, planInstall } from '../src/installer.js'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'evolution-install-'))
@@ -29,6 +29,13 @@ test('planInstall is zero-write and returns an exact append-only preview', async
   assert.match(plan.appendBlock, /id: deepseek-skill-evolution/)
   assert.match(plan.appendBlock, /config:\n    workspace:/)
   assert.match(plan.beforeHash, /^[a-f0-9]{64}$/)
+})
+
+test('detectHarnessVersion uses the real dsh command output and fails closed', () => {
+  const version = detectHarnessVersion('dsh', () => ({ status: 0, stdout: '0.1.0-rc.6\n', stderr: '' }))
+  assert.equal(version, '0.1.0-rc.6')
+  assert.throws(() => detectHarnessVersion('dsh', () => ({ status: 1, stdout: '', stderr: 'failed' })), /could not read Harness version/)
+  assert.throws(() => detectHarnessVersion('dsh', () => ({ status: 0, stdout: 'unknown', stderr: '' })), /unrecognized Harness version/)
 })
 
 test('installHarness creates a backup and appends exactly one plugin row in a temporary DSH home', async () => {

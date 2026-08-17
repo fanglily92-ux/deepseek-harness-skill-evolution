@@ -1,8 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-
 import { createEvolutionTools } from '../src/tools.js'
+import { defineEvolutionTool as defineTool } from '../src/tool-definition.js'
 
 function services() {
   return {

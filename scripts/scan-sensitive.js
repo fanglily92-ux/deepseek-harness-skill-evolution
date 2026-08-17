@@ -9,7 +9,9 @@ const linuxUserRoot = `/${['ho', 'me'].join('')}/`
 const RULES = [
   ['absolute-user-path', new RegExp(`(?:${macUserRoot}|${linuxUserRoot})[^/\\s"']+/`)],
   ['credential-assignment', new RegExp(String.raw`(?:[A-Z0-9]+[_-])*(?:API[_-]?KEY|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|PASSWORD|COOKIE)\s*[:=]\s*["']?[A-Za-z0-9_./+\-=]{8,}`, 'i')],
-  ['private-key', new RegExp(['-----BEGIN ', 'PRIVATE KEY-----'].join(''))],
+  ['private-key', new RegExp(['-----BEGIN ', '[A-Z ]*PRIVATE KEY-----'].join(''))],
+  ['credential-url', /https?:\/\/[^\s/:@]+:[^\s/@]+@/i],
+  ['npm-auth-token', /(?:^|\s)_authToken\s*=\s*[^\s$][^\s]*/i],
 ]
 
 async function collectFiles(root, directory = root) {

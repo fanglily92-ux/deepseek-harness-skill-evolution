@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import {
   assertContainedRegularFile,
+  assertContainedPathNoSymlinks,
   resolveWorkbenchPaths,
 } from '../src/paths.js'
 
@@ -19,6 +20,16 @@ test('resolveWorkbenchPaths returns only paths contained by the workspace', () =
   assert.equal(
     paths.evaluationRoot,
     '/workspace/lily_ai/tmp/DeepSeek-Harness自进化/evals',
+  )
+})
+
+test('assertContainedPathNoSymlinks rejects a symlinked parent directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'evolution-paths-'))
+  const outside = await mkdtemp(join(tmpdir(), 'evolution-outside-'))
+  await symlink(outside, join(root, 'state'))
+  await assert.rejects(
+    assertContainedPathNoSymlinks(root, join(root, 'state', 'receipts.jsonl'), { allowMissingLeaf: true }),
+    /symlink/,
   )
 })
 

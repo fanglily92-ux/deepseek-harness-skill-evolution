@@ -1,4 +1,5 @@
 import { lstat, open, readFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
 import { relative, resolve } from 'node:path'
 
 import { atomicReplace, sha256, snapshotRegularFile } from './atomic-files.js'
@@ -6,6 +7,15 @@ import { atomicReplace, sha256, snapshotRegularFile } from './atomic-files.js'
 const SUPPORTED_HARNESS_VERSION = '0.1.0-rc.6'
 const MINIMUM_NODE_MAJOR = 22
 const PLUGIN_ID = 'deepseek-skill-evolution'
+
+export function detectHarnessVersion(command = 'dsh', spawn = spawnSync) {
+  const result = spawn(command, ['--version'], { encoding: 'utf8', shell: false })
+  if (result.error || result.status !== 0) throw new Error('could not read Harness version with dsh --version')
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+  const match = output.match(/\b\d+\.\d+\.\d+-rc\.\d+\b/)
+  if (!match) throw new Error('unrecognized Harness version output')
+  return match[0]
+}
 
 function assertSupportedVersions({ harnessVersion, nodeVersion }) {
   if (harnessVersion !== SUPPORTED_HARNESS_VERSION) {
