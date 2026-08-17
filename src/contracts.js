@@ -47,10 +47,20 @@ export function assertReceipt(receipt) {
   if (!Number.isInteger(receipt.turn) || receipt.turn < 0) throw new Error('invalid receipt turn')
   if (!RECEIPT_OUTCOMES.includes(receipt.outcome)) throw new Error('invalid receipt outcome')
   if (!receipt.evidence || typeof receipt.evidence !== 'object' || Array.isArray(receipt.evidence)) throw new Error('invalid receipt evidence')
-  assertExactFields(receipt.evidence, new Set(['errorClass', 'toolCalls', 'durationMs']), 'evidence')
+  assertExactFields(
+    receipt.evidence,
+    new Set(['errorClass', 'userSignal', 'toolCalls', 'toolFailures', 'validationCalls', 'durationMs', 'startSeq', 'endSeq']),
+    'evidence',
+  )
   if (typeof receipt.evidence.errorClass !== 'string' || receipt.evidence.errorClass.length === 0) throw new Error('invalid evidence errorClass')
+  if (!['positive', 'negative', 'none'].includes(receipt.evidence.userSignal)) throw new Error('invalid evidence userSignal')
   assertNonNegativeNumber(receipt.evidence.toolCalls, 'evidence.toolCalls')
+  assertNonNegativeNumber(receipt.evidence.toolFailures, 'evidence.toolFailures')
+  assertNonNegativeNumber(receipt.evidence.validationCalls, 'evidence.validationCalls')
   assertNonNegativeNumber(receipt.evidence.durationMs, 'evidence.durationMs')
+  assertNonNegativeNumber(receipt.evidence.startSeq, 'evidence.startSeq')
+  assertNonNegativeNumber(receipt.evidence.endSeq, 'evidence.endSeq')
+  if (receipt.evidence.endSeq < receipt.evidence.startSeq) throw new Error('evidence.endSeq must not precede startSeq')
   assertNonNegativeNumber(receipt.createdAt, 'createdAt')
   return receipt
 }

@@ -46,8 +46,13 @@ test('assertReceipt accepts the privacy-bounded receipt contract', () => {
     outcome: 'failure',
     evidence: {
       errorClass: 'REWORK',
+      userSignal: 'negative',
       toolCalls: 3,
+      toolFailures: 0,
+      validationCalls: 1,
       durationMs: 1250,
+      startSeq: 10,
+      endSeq: 20,
     },
     createdAt: 1786924800000,
   }
@@ -63,7 +68,16 @@ test('assertReceipt rejects raw prompt fields and unknown outcome values', () =>
     sessionHash: 'a'.repeat(64),
     turn: 2,
     outcome: 'failure',
-    evidence: { errorClass: 'REWORK', toolCalls: 3, durationMs: 1250 },
+    evidence: {
+      errorClass: 'REWORK',
+      userSignal: 'negative',
+      toolCalls: 3,
+      toolFailures: 0,
+      validationCalls: 1,
+      durationMs: 1250,
+      startSeq: 10,
+      endSeq: 20,
+    },
     createdAt: 1786924800000,
     rawPrompt: 'must never be stored',
   }
