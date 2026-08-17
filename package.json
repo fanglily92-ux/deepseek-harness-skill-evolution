@@ -1,0 +1,23 @@
+{
+  "name": "deepseek-harness-skill-evolution",
+  "version": "0.1.0",
+  "description": "A local, approval-gated Skill evolution workbench for DeepSeek Harness.",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node scripts/check-syntax.js",
+    "test": "node --test",
+    "install:harness": "node scripts/install-harness.js",
+    "doctor": "node scripts/doctor.js",
+    "scan:sensitive": "node scripts/scan-sensitive.js"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "yaml": "2.9.0"
+  }
+}
