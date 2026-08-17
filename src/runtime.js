@@ -7,9 +7,10 @@ import { buildCandidate, buildPattern } from './candidate-builder.js'
 import { parseStrategyCatalog, appendCandidateRule } from './strategy-rules.js'
 import { hashCatalog, promoteCandidate, recoverPromotionJournal } from './promoter.js'
 import { ReceiptLedger } from './receipt-ledger.js'
-import { assertContainedPathNoSymlinks, resolveWorkbenchPaths } from './paths.js'
+import { assertContainedPathNoSymlinks, assertProjectSkillAbsent, resolveWorkbenchPaths } from './paths.js'
 import { validateCandidate } from './validator.js'
-import { EVOLVABLE_FAILURE_MECHANISMS } from './contracts.js'
+import { EVOLVABLE_FAILURE_MECHANISMS, primaryMetricForMechanism } from './contracts.js'
+import { buildWorkbenchProjection, createApprovalCard } from './dashboard.js'
 
 function currentDate(now) {
   const value = now()
@@ -111,10 +112,12 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
   }
 
   async function ensureRecovered() {
+    assertProjectSkillAbsent(paths.projectSkill)
+    await assertAuthorityPaths()
     await recoverPromotionJournal({
       journalPath: paths.promotionJournal,
       expectedPaths: [strategyPath, paths.versions, paths.candidates],
-      expectedLockPath: `${strategyPath}.lock`,
+      expectedLockPaths: [`${paths.candidates}.lock`, `${strategyPath}.lock`],
     })
   }
 
@@ -131,13 +134,26 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
       }
       const catalog = parseStrategyCatalog(await readFile(strategyPath, 'utf8'))
       const state = await readCandidateStateOnly(paths.authorityRoot, paths.candidates)
+      const candidates = state.candidates.map((candidate) => ({
+        id: candidate.id,
+        state: candidate.state,
+        ...(candidate.state === 'awaiting-approval' ? { approvalCard: createApprovalCard(candidate) } : {}),
+      }))
       return {
         health: observerHealth.status,
         observer: { status: observerHealth.status, lastErrorCode: observerHealth.lastErrorCode ?? null, lastSuccessSeq: observerHealth.lastSuccessSeq ?? null },
         stableVersion: catalog.stableVersion,
         stableHash: hashCatalog(catalog),
         receiptCount: ledgerHealth.count,
-        candidates: state.candidates.map(({ id, state: candidateState }) => ({ id, state: candidateState })),
+        candidates,
+        projection: buildWorkbenchProjection({
+          health: observerHealth.status,
+          stableVersion: catalog.stableVersion,
+          stableHash: hashCatalog(catalog),
+          receiptCount: ledgerHealth.count,
+          candidates: state.candidates,
+          catalog,
+        }),
       }
     },
 
@@ -160,7 +176,8 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
       const cases = await reviewCases(paths, args.case_ids)
       const mechanism = cases[0].evidence.errorClass
       if (args.mechanism !== mechanism) throw new Error('proposed mechanism does not match reviewed evidence')
-      if (!Number.isFinite(args.baseline_value) || args.baseline_value < 0) throw new Error('baseline_value must be a non-negative finite number')
+      if ('primary_metric' in args || 'baseline_value' in args) throw new Error('primary metric is fixed by the evaluation policy')
+      const primaryMetric = primaryMetricForMechanism(mechanism)
       const catalog = parseStrategyCatalog(await readFile(strategyPath, 'utf8'))
       const existing = await readCandidateState(paths.authorityRoot, paths.candidates)
       const date = currentDate(now)
@@ -174,9 +191,9 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
         action: args.action,
         avoid: args.avoid,
         evidenceCaseIds: [...args.case_ids],
-        primaryMetric: args.primary_metric,
-        baselineValue: args.baseline_value,
-        candidateValue: args.baseline_value,
+        primaryMetric,
+        baselineValue: null,
+        candidateValue: null,
         introducedBy: candidateId,
       }
       appendCandidateRule(catalog, proposedRule)
@@ -189,7 +206,7 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
         state.candidates.push(candidate)
         return state
       })
-      return { candidateId: candidate.id, state: candidate.state, stableChanged: false, baselineHash: candidate.baselineHash }
+      return { candidateId: candidate.id, state: candidate.state, stableChanged: false, baselineHash: candidate.baselineHash, primaryMetric }
     },
 
     async validate({ candidate_id: candidateId }, exec) {
@@ -223,11 +240,11 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
         await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => { const target = findCandidate(next, candidateId); if (target.validationAttemptId !== attemptId) throw new Error('validation attempt changed'); target.state = 'rejected'; target.evaluationReport = evaluationReport; target.validationReport = validation; delete target.validationAttemptId; return next })
         return { candidateId, status: 'rejected', reason: validation.reason, stableChanged: false }
       }
-      const support = evaluationReport.fixtureResults.filter((result) => result.partition === 'support')
-      await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => {
+      const updated = await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => {
         const target = findCandidate(next, candidateId)
         if (target.state !== 'validating' || target.validationAttemptId !== attemptId) throw new Error('candidate state changed during validation')
         target.state = 'awaiting-approval'
+        target.proposedRule.baselineValue = validation.scorecard.supportStable / validation.scorecard.supportCount
         target.proposedRule.candidateValue = validation.scorecard.supportCandidate / validation.scorecard.supportCount
         target.validationReportHash = validation.reportHash
         target.evaluationReport = evaluationReport
@@ -235,7 +252,8 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
         delete target.validationAttemptId
         return next
       })
-      return { candidateId, status: 'awaiting-approval', validationReportHash: validation.reportHash, stableChanged: false }
+      const approvedCandidate = findCandidate(updated, candidateId)
+      return { candidateId, status: 'awaiting-approval', validationReportHash: validation.reportHash, approvalCard: createApprovalCard(approvedCandidate), stableChanged: false }
     },
 
     async promote({ candidate_id: candidateId }) {
@@ -259,7 +277,7 @@ export function createRuntimeServices({ workspace, authorityRoot, evaluator, now
       await ensureFile(paths.authorityRoot, paths.versions, '')
       const result = await promoteCandidate({
         candidate,
-        validationReport: candidate.validationReport,
+        validationReport: revalidated,
         strategyPath,
         versionsPath: paths.versions,
         candidateStatePath: paths.candidates,

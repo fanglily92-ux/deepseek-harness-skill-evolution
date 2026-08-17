@@ -6,6 +6,8 @@ import { join } from 'node:path'
 
 import { detectHarnessVersion, installHarness, planInstall } from '../src/installer.js'
 
+const isolatedFixtureDependencies = { authorityGuard() {} }
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'evolution-install-'))
   const dshHome = join(root, '.dsh')
@@ -37,7 +39,7 @@ async function fixture() {
 test('planInstall is zero-write and returns an exact append-only preview', async () => {
   const options = await fixture()
   const before = await readFile(options.presetPath, 'utf8')
-  const plan = await planInstall(options)
+  const plan = await planInstall(options, isolatedFixtureDependencies)
 
   assert.equal(await readFile(options.presetPath, 'utf8'), before)
   assert.equal(plan.writeRequired, true)
@@ -58,8 +60,8 @@ test('detectHarnessVersion uses the real dsh command output and fails closed', (
 
 test('installHarness creates a backup and appends exactly one plugin row in a temporary DSH home', async () => {
   const options = await fixture()
-  const preview = await planInstall(options)
-  const result = await installHarness({ ...options, expectedPresetHash: preview.beforeHash, expectedSourceManifestHash: preview.sourceManifestHash })
+  const preview = await planInstall(options, isolatedFixtureDependencies)
+  const result = await installHarness({ ...options, expectedPresetHash: preview.beforeHash, expectedSourceManifestHash: preview.sourceManifestHash }, isolatedFixtureDependencies)
   const installed = await readFile(options.presetPath, 'utf8')
 
   assert.equal((installed.match(/id: deepseek-skill-evolution/g) ?? []).length, 1)
@@ -71,18 +73,23 @@ test('installHarness creates a backup and appends exactly one plugin row in a te
 test('planInstall rejects project Skill shadowing and symlinked source files', async () => {
   const options = await fixture()
   await mkdir(join(options.workspace, '.dsh', 'skills', 'optimize-work-strategy'), { recursive: true })
-  await assert.rejects(planInstall(options), /shadows the protected user Skill/)
+  await assert.rejects(planInstall(options, isolatedFixtureDependencies), /shadows the protected user Skill/)
 
   const other = await fixture()
   const real = join(other.sourceRoot, 'index.js')
   const linked = join(other.sourceRoot, 'src', 'linked.js')
   await symlink(real, linked)
-  await assert.rejects(planInstall(other), /symlink/)
+  await assert.rejects(planInstall(other, isolatedFixtureDependencies), /symlink/)
 })
 
 test('planInstall rejects a symlinked authority parent', async () => {
   const options = await fixture()
   const outside = await mkdtemp(join(tmpdir(), 'evolution-install-outside-'))
   await symlink(outside, join(options.dshHome, 'plugins'))
-  await assert.rejects(planInstall(options), /symlink/)
+  await assert.rejects(planInstall(options, isolatedFixtureDependencies), /symlink/)
+})
+
+test('planInstall rejects a sandbox-writable temporary DSH home', async () => {
+  const options = await fixture()
+  await assert.rejects(planInstall(options), /temporary directory|symlink or aliased path/)
 })

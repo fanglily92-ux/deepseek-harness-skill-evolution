@@ -17,9 +17,9 @@ Each rule contains exactly:
 - `action`: one narrow action to add.
 - `avoid`: the corresponding anti-pattern.
 - `evidenceCaseIds`: at least three unique, independent `CASE-*` receipts sharing the same mechanism.
-- `primaryMetric`: the predeclared error or rework metric.
-- `baselineValue`: stable-version value; lower is better.
-- `candidateValue`: candidate value; it must be strictly lower before promotion.
+- `primaryMetric`: the evaluator-fixed error metric for the declared failure mechanism; callers cannot choose it.
+- `baselineValue`: `null` before validation, then the stable-version value measured by the bound report; lower is better.
+- `candidateValue`: `null` before validation, then the candidate value measured by the same report; it must be strictly lower before promotion.
 - `introducedBy`: exact `EVO-YYYYMMDD-NNN` candidate id.
 
 ## Monotonic rules

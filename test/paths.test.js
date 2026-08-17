@@ -42,6 +42,9 @@ test('resolveWorkbenchPaths rejects broad or ambiguous workspace roots', () => {
   assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/workspace/lily_ai/authority', homePath: '/home/tester' }), /authorityRoot must be outside workspace/)
   assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/workspace', homePath: '/home/tester' }), /must not contain workspace/)
   assert.throws(() => assertAuthorityRootOutsideSandboxTemp('/tmp/evolution-authority', { temporaryRoot: '/tmp', realpath: (value) => value }), /temporary directory/)
+  assert.throws(() => assertAuthorityRootOutsideSandboxTemp('/private/tmp/evolution-authority', {
+    temporaryRoots: ['/tmp', '/private/tmp', '/var/tmp'], realpath: (value) => value,
+  }), /temporary directory/)
 })
 
 test('assertContainedRegularFile accepts a real file inside the root', async () => {

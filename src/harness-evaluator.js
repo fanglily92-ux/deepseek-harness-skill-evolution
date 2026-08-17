@@ -151,6 +151,8 @@ async function hashEvaluatorCode() {
     new URL('./evaluation-suite.js', import.meta.url),
     new URL('./validator.js', import.meta.url),
     new URL('./blind-comparator.js', import.meta.url),
+    new URL('./shadow-runner.js', import.meta.url),
+    new URL('./contracts.js', import.meta.url),
   ].map((url) => readFile(fileURLToPath(url), 'utf8')))
   return hashCanonical(sources)
 }

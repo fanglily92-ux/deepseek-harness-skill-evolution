@@ -1,5 +1,8 @@
 {
   "schemaVersion": 1,
+  "primaryMetricByMechanism": {
+    "UNCLEAR_APPROVAL": "golden-label-error-rate"
+  },
   "supportMinimum": 3,
   "heldoutMinimum": 2,
   "stochasticTrials": 3,

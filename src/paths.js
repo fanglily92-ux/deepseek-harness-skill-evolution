@@ -1,5 +1,5 @@
 import { lstat } from 'node:fs/promises'
-import { realpathSync } from 'node:fs'
+import { lstatSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
@@ -10,13 +10,17 @@ function assertContained(root, target) {
   }
 }
 
-export function assertAuthorityRootOutsideSandboxTemp(authorityRoot, { temporaryRoot = tmpdir(), realpath = realpathSync } = {}) {
+export function assertAuthorityRootOutsideSandboxTemp(authorityRoot, { temporaryRoot, temporaryRoots, realpath = realpathSync } = {}) {
   const authority = realpath(resolve(authorityRoot))
-  const temporary = realpath(resolve(temporaryRoot))
   if (authority !== resolve(authorityRoot)) throw new Error('authorityRoot must not be a symlink or aliased path')
-  const relation = relative(temporary, authority)
-  if (relation === '' || (!relation.startsWith('..') && !isAbsolute(relation))) {
-    throw new Error('authorityRoot may not be inside the sandbox-writable temporary directory')
+  const roots = temporaryRoots ?? [temporaryRoot ?? tmpdir(), '/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp']
+  for (const value of new Set(roots.map((root) => resolve(root)))) {
+    let temporary
+    try { temporary = realpath(value) } catch (error) { if (error.code === 'ENOENT') continue; throw error }
+    const relation = relative(temporary, authority)
+    if (relation === '' || (!relation.startsWith('..') && !isAbsolute(relation))) {
+      throw new Error('authorityRoot may not be inside a sandbox-writable temporary directory')
+    }
   }
   return authority
 }
@@ -57,12 +61,24 @@ export function resolveWorkbenchPaths(workspace, { authorityRoot, homePath = hom
     backups: join(stateRoot, 'backups'),
     strategy: join(authority, 'skills', 'optimize-work-strategy', 'references', 'strategies.yaml'),
     stableSkill: join(authority, 'skills', 'optimize-work-strategy', 'SKILL.md'),
+    projectSkill: join(root, '.dsh', 'skills', 'optimize-work-strategy'),
     evaluationRoot: join(root, 'tmp', 'DeepSeek-Harness自进化', 'evals'),
   }
 
   for (const value of [paths.receipts, paths.receiptAnchor, paths.candidates, paths.versions, paths.promotionJournal, paths.backups, paths.strategy, paths.stableSkill]) assertContained(authority, value)
   assertContained(root, paths.evaluationRoot)
+  assertContained(root, paths.projectSkill)
   return Object.freeze(paths)
+}
+
+export function assertProjectSkillAbsent(projectSkill, { lstat = lstatSync } = {}) {
+  try {
+    lstat(projectSkill)
+  } catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
+  throw new Error('project Skill shadows the protected user Skill')
 }
 
 export async function assertContainedRegularFile(root, target) {

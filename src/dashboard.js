@@ -2,6 +2,56 @@ function countState(candidates, state) {
   return candidates.filter((candidate) => candidate.state === state).length
 }
 
+function partitionScore(fixtureResults, partition) {
+  const rows = fixtureResults.filter((result) => result.partition === partition)
+  return {
+    count: rows.length,
+    stableErrors: rows.reduce((sum, result) => sum + result.stablePrimary, 0),
+    candidateErrors: rows.reduce((sum, result) => sum + result.candidatePrimary, 0),
+  }
+}
+
+export function createApprovalCard(candidate) {
+  const report = candidate.evaluationReport ?? {}
+  const rows = Array.isArray(report.fixtureResults) ? report.fixtureResults : []
+  const support = partitionScore(rows, 'support')
+  const heldout = partitionScore(rows, 'heldout')
+  return {
+    candidateId: candidate.id,
+    state: candidate.state,
+    exactDiff: { operation: 'append-one-rule', rule: structuredClone(candidate.proposedRule) },
+    hashes: {
+      baseline: candidate.baselineHash,
+      candidate: candidate.candidateHash,
+      validationReport: candidate.validationReportHash,
+      stableSkill: candidate.evaluationBinding?.stableSkillHash,
+      stableStrategies: candidate.evaluationBinding?.stableStrategiesHash,
+      fixtures: candidate.evaluationBinding?.fixtureManifestHash,
+      evaluationPolicy: candidate.evaluationBinding?.evaluationPolicyHash,
+      evaluatorCode: candidate.evaluationBinding?.evaluatorCodeHash,
+    },
+    evaluation: {
+      support,
+      heldout,
+      allGoldenIncluded: report.allGoldenIncluded === true,
+      comparator: report.comparator ?? null,
+    },
+    guardrails: {
+      allCriticalPass: rows.length > 0 && rows.every((row) => row.stableCriticalPass === true && row.candidateCriticalPass === true),
+      zeroHeldoutRegression: heldout.count > 0 && heldout.candidateErrors <= heldout.stableErrors,
+      strictSupportImprovement: support.count > 0 && support.candidateErrors < support.stableErrors,
+    },
+    cost: {
+      armRuns: rows.length * 2,
+      maxArmRuns: report.budget?.maxRuns ?? null,
+      timeoutMsPerRun: report.budget?.timeoutMs ?? null,
+      budgetExhausted: report.budget?.exhausted ?? null,
+    },
+    uncertainty: ['LLM execution is stochastic; only the precommitted fixture boundary was evaluated.'],
+    rollbackCondition: 'Any attributable critical regression quarantines the rule; restoration requires a separately reviewed rollback path.',
+  }
+}
+
 export function renderDashboard(state) {
   const candidates = Array.isArray(state.candidates) ? state.candidates : []
   return `# DeepSeek Harness 自进化工作台
@@ -56,6 +106,7 @@ ${body}
 }
 
 export function renderCandidateCard(candidate, report) {
+  const approvalCard = createApprovalCard(candidate)
   const checks = Array.isArray(report.checks) && report.checks.length > 0
     ? report.checks.map((check) => `- \`${check}\``).join('\n')
     : '- 无已记录检查。'
@@ -84,5 +135,23 @@ ${scorecard}
 ## 检查
 
 ${checks}
+
+## 人工审批证据
+
+\`\`\`json
+${JSON.stringify(approvalCard, null, 2)}
+\`\`\`
 `
+}
+
+export function buildWorkbenchProjection({ health, stableVersion, stableHash, receiptCount, candidates, catalog }) {
+  const files = {
+    '工作台首页.md': renderDashboard({ health, stableVersion, stableHash, receiptCount, candidates }),
+    '审批队列.md': renderApprovalQueue(candidates),
+    '策略账本.md': renderStrategyLedger(catalog),
+  }
+  for (const candidate of candidates.filter((item) => item.validationReport && item.evaluationReport)) {
+    files[`候选方案/${candidate.id}.md`] = renderCandidateCard(candidate, candidate.validationReport)
+  }
+  return files
 }

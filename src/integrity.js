@@ -13,6 +13,6 @@ export function hashCanonical(value) {
 }
 
 export function hashCandidateProposal(rule) {
-  const { candidateValue: _measuredAfterEvaluation, ...proposal } = rule
+  const { baselineValue: _baselineMeasuredAfterEvaluation, candidateValue: _candidateMeasuredAfterEvaluation, ...proposal } = rule
   return hashCanonical(proposal)
 }

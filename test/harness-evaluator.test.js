@@ -2,10 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 import { createChildAgentArmRunner, createHarnessEvaluator } from '../src/harness-evaluator.js'
+import { hashCanonical } from '../src/integrity.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -28,10 +29,14 @@ test('Harness evaluator runs paired fixtures with identical environment and retu
     },
   })
   const prepared = await evaluator.prepareCandidateBinding()
+  const evaluatorSources = await Promise.all([
+    'harness-evaluator.js', 'evaluation-suite.js', 'validator.js', 'blind-comparator.js', 'shadow-runner.js', 'contracts.js',
+  ].map((name) => readFile(join(root, 'src', name), 'utf8')))
+  assert.equal(prepared.evaluatorCodeHash, hashCanonical(evaluatorSources))
   const candidate = {
     id: 'EVO-20260818-001', createdAt: 1786924800000,
     candidateHash: 'a'.repeat(64), baselineHash: 'b'.repeat(64),
-    proposedRule: { appliesWhen: { failureMechanisms: ['UNCLEAR_APPROVAL'] } },
+    proposedRule: { primaryMetric: 'golden-label-error-rate', appliesWhen: { failureMechanisms: ['UNCLEAR_APPROVAL'] } },
     evaluationBinding: { ...prepared, baselineCatalogHash: 'b'.repeat(64), candidateHash: 'a'.repeat(64) },
   }
   const report = await evaluator(candidate, { agent: { options: { provider: 'same-provider', model: 'same-model' } } })

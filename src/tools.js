@@ -52,8 +52,6 @@ export function createEvolutionTools({ defineTool, services }) {
         task_kinds: { type: 'array', required: true, items: { type: 'string' }, description: 'Narrow task kinds supported by the evidence.' },
         action: { type: 'string', required: true, description: 'One concrete behavior to add.' },
         avoid: { type: 'string', required: true, description: 'The old behavior this rule prevents.' },
-        primary_metric: { type: 'string', required: true, description: 'Precommitted lower-is-better primary metric.' },
-        baseline_value: { type: 'number', required: true, description: 'Observed baseline for the precommitted metric.' },
       },
       service: services.propose,
       concurrencySafe: false,

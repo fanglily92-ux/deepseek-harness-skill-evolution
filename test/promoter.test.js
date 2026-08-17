@@ -31,7 +31,7 @@ async function setup() {
 
 test('promoteCandidate atomically appends one stable rule, backup, and version row', async () => {
   const paths = await setup()
-  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportStable: 6, supportCandidate: 0, supportCount: 3 } }
   const candidate = {
     id: 'EVO-20260817-001', state: 'awaiting-approval', baselineHash: hashCatalog(paths.catalog),
     validationReportHash: validationReport.reportHash, proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()),
@@ -59,7 +59,7 @@ test('promoteCandidate rejects a stale validation hash before writing', async ()
 test('promoteCandidate restores the old catalog if the version ledger cannot commit', async () => {
   const paths = await setup()
   await mkdir(paths.versionsPath)
-  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportStable: 6, supportCandidate: 0, supportCount: 3 } }
   const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()) }
 
   await assert.rejects(promoteCandidate({ ...paths, candidate, validationReport, now: () => 1 }))
@@ -69,10 +69,18 @@ test('promoteCandidate restores the old catalog if the version ledger cannot com
 test('promoteCandidate rejects a proposal changed after validation', async () => {
   const paths = await setup()
   const original = proposedRule()
-  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportStable: 6, supportCandidate: 0, supportCount: 3 } }
   const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: { ...original, action: 'Changed after validation.' }, candidateHash: hashCandidateProposal(original) }
   await assert.rejects(promoteCandidate({ ...paths, candidate, validationReport }), /candidate content hash mismatch/)
   assert.deepEqual(JSON.parse(await readFile(paths.strategyPath, 'utf8')), paths.catalog)
+})
+
+test('promoteCandidate rejects measured baseline values not bound to the validation scorecard', async () => {
+  const paths = await setup()
+  const original = proposedRule()
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportStable: 3, supportCandidate: 0, supportCount: 3 } }
+  const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: { ...original, baselineValue: 99 }, candidateHash: hashCandidateProposal(original) }
+  await assert.rejects(promoteCandidate({ ...paths, candidate, validationReport }), /baseline metric is not bound/)
 })
 
 test('promotion journal recovers catalog, versions, and candidate state after a simulated crash', async () => {
@@ -80,7 +88,7 @@ test('promotion journal recovers catalog, versions, and candidate state after a 
   await writeFile(paths.versionsPath, '')
   const candidateStatePath = join(paths.root, 'candidates.json')
   const journalPath = join(paths.root, 'promotion.journal.json')
-  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportStable: 6, supportCandidate: 0, supportCount: 3 } }
   const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()) }
   await writeFile(candidateStatePath, `${JSON.stringify({ schemaVersion: 1, candidates: [candidate] }, null, 2)}\n`)
 
@@ -92,11 +100,75 @@ test('promotion journal recovers catalog, versions, and candidate state after a 
   await recoverPromotionJournal({
     journalPath,
     expectedPaths: [paths.strategyPath, paths.versionsPath, candidateStatePath],
-    expectedLockPath: `${paths.strategyPath}.lock`,
+    expectedLockPaths: [`${candidateStatePath}.lock`, `${paths.strategyPath}.lock`],
     force: true,
   })
   assert.deepEqual(JSON.parse(await readFile(paths.strategyPath, 'utf8')), paths.catalog)
   assert.equal(await readFile(paths.versionsPath, 'utf8'), '')
   assert.equal(JSON.parse(await readFile(candidateStatePath, 'utf8')).candidates[0].state, 'awaiting-approval')
   await assert.rejects(readFile(journalPath), /ENOENT/)
+})
+
+test('promoteCandidate acquires the candidate-state lock before changing any transaction file', async () => {
+  const paths = await setup()
+  await writeFile(paths.versionsPath, '')
+  const candidateStatePath = join(paths.root, 'candidates.json')
+  const journalPath = join(paths.root, 'promotion.journal.json')
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportStable: 6, supportCandidate: 0, supportCount: 3 } }
+  const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()) }
+  const originalState = `${JSON.stringify({ schemaVersion: 1, candidates: [candidate] }, null, 2)}\n`
+  await writeFile(candidateStatePath, originalState)
+  await writeFile(`${candidateStatePath}.lock`, `${process.pid}\n`)
+
+  await assert.rejects(promoteCandidate({
+    ...paths, candidate, validationReport, candidateStatePath, journalPath,
+  }), /lock already exists/)
+
+  assert.deepEqual(JSON.parse(await readFile(paths.strategyPath, 'utf8')), paths.catalog)
+  assert.equal(await readFile(paths.versionsPath, 'utf8'), '')
+  assert.equal(await readFile(candidateStatePath, 'utf8'), originalState)
+  await assert.rejects(readFile(journalPath), /ENOENT/)
+})
+
+test('committed journal recovery refuses to clean up a live promotion', async () => {
+  const paths = await setup()
+  await writeFile(paths.versionsPath, '')
+  const candidateStatePath = join(paths.root, 'candidates.json')
+  await writeFile(candidateStatePath, '{"schemaVersion":1,"candidates":[]}\n')
+  const snapshots = await Promise.all([paths.strategyPath, paths.versionsPath, candidateStatePath].map(async (path) => {
+    const content = await readFile(path)
+    return { path, hash: (await import('../src/atomic-files.js')).sha256(content), contentBase64: content.toString('base64') }
+  }))
+  const lockPaths = [`${candidateStatePath}.lock`, `${paths.strategyPath}.lock`]
+  for (const path of lockPaths) await writeFile(path, `${process.pid}\n`)
+  const journalPath = join(paths.root, 'promotion.journal.json')
+  await writeFile(journalPath, `${JSON.stringify({
+    schemaVersion: 2, phase: 'committed', pid: process.pid, lockPaths, snapshots,
+    afterHashes: Object.fromEntries(snapshots.map((snapshot) => [snapshot.path, snapshot.hash])),
+  })}\n`)
+
+  await assert.rejects(recoverPromotionJournal({
+    journalPath,
+    expectedPaths: snapshots.map((snapshot) => snapshot.path),
+    expectedLockPaths: lockPaths,
+  }), /promotion transaction is still active/)
+  await readFile(journalPath)
+  for (const path of lockPaths) await readFile(path)
+})
+
+test('journal recovery clears only dead orphan promotion locks when no journal exists', async () => {
+  const paths = await setup()
+  const candidateStatePath = join(paths.root, 'candidates.json')
+  const lockPaths = [`${candidateStatePath}.lock`, `${paths.strategyPath}.lock`]
+  const deadPid = 2147483647
+  await writeFile(lockPaths[0], `${deadPid}\n`)
+
+  const result = await recoverPromotionJournal({
+    journalPath: join(paths.root, 'promotion.journal.json'),
+    expectedPaths: [paths.strategyPath, paths.versionsPath, candidateStatePath],
+    expectedLockPaths: lockPaths,
+  })
+
+  assert.deepEqual(result, { recovered: true, action: 'cleared-orphan-locks' })
+  await assert.rejects(readFile(lockPaths[0]), /ENOENT/)
 })

@@ -14,6 +14,15 @@ export const CANDIDATE_STATES = Object.freeze([
   'stale',
 ])
 export const EVOLVABLE_FAILURE_MECHANISMS = Object.freeze(['UNCLEAR_APPROVAL'])
+export const PRIMARY_METRIC_BY_MECHANISM = Object.freeze({
+  UNCLEAR_APPROVAL: 'golden-label-error-rate',
+})
+
+export function primaryMetricForMechanism(mechanism) {
+  const metric = PRIMARY_METRIC_BY_MECHANISM[mechanism]
+  if (!metric) throw new Error('failure mechanism has no fixed evaluation metric')
+  return metric
+}
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const CASE_ID_PATTERN = /^CASE-[a-f0-9]{16}$/

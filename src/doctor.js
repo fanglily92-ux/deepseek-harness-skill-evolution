@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { installerContract } from './installer.js'
-import { assertContainedPathNoSymlinks } from './paths.js'
+import { assertAuthorityRootOutsideSandboxTemp, assertContainedPathNoSymlinks } from './paths.js'
 
 async function regularFile(path) {
   try {
@@ -58,6 +58,7 @@ async function hasNoLockFiles(paths) {
 export async function runDoctor(options) {
   const workspace = resolve(options.workspace)
   const authorityRoot = resolve(options.authorityRoot ?? options.dshHome)
+  const authorityGuard = options.authorityGuard ?? assertAuthorityRootOutsideSandboxTemp
   const pluginEntry = resolve(options.pluginEntry)
   const presetPath = resolve(options.presetPath)
   const stateRoot = join(authorityRoot, '.skill-evolution-authority', 'state')
@@ -85,7 +86,9 @@ export async function runDoctor(options) {
   )
 
   const pluginRelation = relative(authorityRoot, pluginEntry)
-  const authorityOk = pluginRelation !== '' && !pluginRelation.startsWith('..') && !isAbsolute(pluginRelation) && await containedRealPath(authorityRoot, pluginEntry)
+  let authorityBoundaryOk = false
+  try { authorityGuard(authorityRoot); authorityBoundaryOk = true } catch {}
+  const authorityOk = authorityBoundaryOk && pluginRelation !== '' && !pluginRelation.startsWith('..') && !isAbsolute(pluginRelation) && await containedRealPath(authorityRoot, pluginEntry)
 
   const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10)
   const checks = [
@@ -95,7 +98,7 @@ export async function runDoctor(options) {
     check('harness-version', dshVersion === installerContract.supportedHarnessVersion, dshVersion ?? 'unknown'),
     check('authority-root', authorityOk, authorityRoot),
     check('plugin-entry', await regularFile(pluginEntry), pluginEntry),
-    check('preset', presetOk, presetPath),
+    check('preset-disk-config', presetOk, presetPath),
     check('skill', await regularFile(skillPath), skillPath),
     check('project-skill-shadow', await pathMissing(projectSkillPath), projectSkillPath),
     check('whitelist', whitelistOk, whitelistPath),
@@ -104,7 +107,7 @@ export async function runDoctor(options) {
     check('candidate-state', await regularFile(join(stateRoot, 'candidates.json')), join(stateRoot, 'candidates.json')),
     check('versions', await regularFile(join(stateRoot, 'versions.jsonl')), join(stateRoot, 'versions.jsonl')),
     check('locks', await hasNoLockFiles([stateRoot, join(authorityRoot, 'skills', 'optimize-work-strategy', 'references')]), 'no stale lock files'),
-    check('dashboard', await regularFile(dashboardPath), dashboardPath),
+    check('projection-presence', await regularFile(dashboardPath), `${dashboardPath} (non-authoritative; freshness not verified)`),
   ]
-  return { ok: checks.every((item) => item.ok), checks }
+  return { ok: checks.every((item) => item.ok), scope: 'disk-preflight-only', mountVerified: false, checks }
 }

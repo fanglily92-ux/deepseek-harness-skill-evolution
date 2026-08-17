@@ -1,3 +1,5 @@
+import { PRIMARY_METRIC_BY_MECHANISM } from './contracts.js'
+
 const FIXTURE_FIELDS = new Set(['id', 'partition', 'mechanism', 'createdAt', 'golden', 'deterministic', 'input', 'expectedDecision'])
 
 function validateFixture(fixture) {
@@ -16,6 +18,10 @@ function validateFixture(fixture) {
 export function buildEvaluationSuite({ candidate, fixtureRegistry, policy }) {
   if (!Array.isArray(fixtureRegistry)) throw new Error('fixtureRegistry must be an array')
   for (const fixture of fixtureRegistry) validateFixture(fixture)
+  const fixedMetric = PRIMARY_METRIC_BY_MECHANISM[candidate.mechanism]
+  if (!fixedMetric || policy.primaryMetricByMechanism?.[candidate.mechanism] !== fixedMetric || candidate.proposedRule?.primaryMetric !== fixedMetric) {
+    throw new Error('candidate primary metric is not bound to the golden-label evaluator')
+  }
   const support = fixtureRegistry.filter((fixture) => fixture.partition === 'support' && fixture.mechanism === candidate.mechanism)
   const heldout = fixtureRegistry.filter((fixture) => fixture.partition === 'heldout' && fixture.createdAt < candidate.createdAt)
   if (support.length < policy.supportMinimum) throw new Error(`evaluation requires at least ${policy.supportMinimum} support fixtures`)

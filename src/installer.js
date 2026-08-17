@@ -3,7 +3,7 @@ import { lstat, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/pr
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { atomicReplace, sha256, snapshotRegularFile } from './atomic-files.js'
-import { assertContainedPathNoSymlinks } from './paths.js'
+import { assertAuthorityRootOutsideSandboxTemp, assertContainedPathNoSymlinks } from './paths.js'
 
 const SUPPORTED_HARNESS_VERSION = '0.1.0-rc.6'
 const MINIMUM_NODE_MAJOR = 22
@@ -66,10 +66,11 @@ function appendBlockFor({ workspace, authorityRoot, pluginEntry }) {
   ].join('\n')
 }
 
-export async function planInstall(options) {
+export async function planInstall(options, { authorityGuard = assertAuthorityRootOutsideSandboxTemp } = {}) {
   assertSupportedVersions(options)
   const sourceRoot = resolve(options.sourceRoot)
   const dshHome = resolve(options.dshHome)
+  authorityGuard(dshHome)
   const workspace = resolve(options.workspace)
   const presetPath = resolve(options.presetPath)
   const packageJson = JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8'))
@@ -127,9 +128,9 @@ async function copyManifest(sourceRoot, targetRoot, files, transform = (path) =>
   }
 }
 
-export async function installHarness(options) {
+export async function installHarness(options, dependencies) {
   if (!options.expectedPresetHash || !options.expectedSourceManifestHash) throw new Error('expectedPresetHash and expectedSourceManifestHash are required for installation')
-  const plan = await planInstall(options)
+  const plan = await planInstall(options, dependencies)
   if (plan.beforeHash !== options.expectedPresetHash) throw new Error('preset hash changed since the approved preview')
   if (plan.sourceManifestHash !== options.expectedSourceManifestHash) throw new Error('source manifest changed since the approved preview')
   let pluginCreated = false

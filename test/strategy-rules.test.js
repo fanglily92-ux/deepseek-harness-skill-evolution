@@ -67,6 +67,11 @@ test('validateStrategyRule rejects candidate actions that expand security or aut
   }
 })
 
+test('candidate metrics are unmeasured until evaluation while stable metrics must be finite', () => {
+  assert.doesNotThrow(() => validateStrategyRule(rule({ status: 'candidate', baselineValue: null, candidateValue: null })))
+  assert.throws(() => validateStrategyRule(rule({ baselineValue: null })), /metric values must be finite/)
+})
+
 test('rulesOverlap requires a shared task kind and failure mechanism', () => {
   assert.equal(rulesOverlap(rule(), rule({ id: 'STR-0002', status: 'candidate' })), true)
   assert.equal(

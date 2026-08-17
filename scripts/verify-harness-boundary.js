@@ -4,6 +4,8 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync 
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { assertAuthorityRootOutsideSandboxTemp } from '../src/paths.js'
+
 const REQUIRED_VERSION = '0.1.0-rc.6'
 
 function commandPath(command) {
@@ -36,6 +38,7 @@ export async function verifyHarnessBoundary() {
   const { LocalSandboxProvider } = await import(pathToFileURL(sandboxEntry).href)
   const cwd = realpathSync(process.cwd())
   const tempRoot = mkdtempSync(join(cwd, '.dsh-evolution-boundary-'))
+  const writableSystemTemp = mkdtempSync(join(existsSync('/private/tmp') ? '/private/tmp' : '/tmp', 'dsh-evolution-writable-temp-'))
   mkdirSync(join(tempRoot, 'workspace'))
   mkdirSync(join(tempRoot, 'authority'))
   const workspace = realpathSync(join(tempRoot, 'workspace'))
@@ -49,20 +52,30 @@ export async function verifyHarnessBoundary() {
     })
     const workspaceTarget = join(workspace, 'allowed.txt')
     const authorityTarget = join(authority, 'denied.txt')
+    const systemTempTarget = join(writableSystemTemp, 'allowed-by-sandbox.txt')
     const allowed = executeConfined(provider, workspaceTarget, workspace)
     const denied = executeConfined(provider, authorityTarget, workspace)
+    const systemTemp = executeConfined(provider, systemTempTarget, workspace)
+    let sandboxTempRejectedAsAuthority = false
+    try { assertAuthorityRootOutsideSandboxTemp(writableSystemTemp) } catch { sandboxTempRejectedAsAuthority = true }
     const result = {
-      ok: allowed.status === 0 && existsSync(workspaceTarget) && denied.status !== 0 && !existsSync(authorityTarget),
+      ok: allowed.status === 0 && existsSync(workspaceTarget)
+        && denied.status !== 0 && !existsSync(authorityTarget)
+        && systemTemp.status === 0 && existsSync(systemTempTarget)
+        && sandboxTempRejectedAsAuthority,
       harnessVersion: REQUIRED_VERSION,
       sandboxPackage: '@deepseek-ai/dsh-sandbox-local',
       enforcement: allowed.enforcement,
       workspaceWrite: allowed.status === 0 && existsSync(workspaceTarget),
       authorityWriteDenied: denied.status !== 0 && !existsSync(authorityTarget),
+      sandboxTempWrite: systemTemp.status === 0 && existsSync(systemTempTarget),
+      sandboxTempRejectedAsAuthority,
     }
     if (!result.ok) throw new Error(`authority boundary probe failed: ${JSON.stringify({ allowed, denied })}`)
     return result
   } finally {
     rmSync(resolve(tempRoot), { recursive: true, force: true })
+    rmSync(resolve(writableSystemTemp), { recursive: true, force: true })
   }
 }
 

@@ -52,7 +52,9 @@ export function validateStrategyRule(rule) {
     throw new Error('strategy rule requires three independent evidence cases')
   }
   if (typeof rule.primaryMetric !== 'string' || rule.primaryMetric.length === 0) throw new Error('primaryMetric must be non-empty')
-  if (!Number.isFinite(rule.baselineValue) || !Number.isFinite(rule.candidateValue)) throw new Error('metric values must be finite')
+  const metricsMeasured = Number.isFinite(rule.baselineValue) && Number.isFinite(rule.candidateValue)
+  const metricsPending = rule.status === 'candidate' && rule.baselineValue === null && rule.candidateValue === null
+  if (!metricsMeasured && !metricsPending) throw new Error('metric values must be finite')
   if (!CANDIDATE_ID.test(rule.introducedBy)) throw new Error('invalid introducedBy candidate id')
   return rule
 }

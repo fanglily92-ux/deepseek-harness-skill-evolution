@@ -23,6 +23,9 @@ test('createEvolutionTools exposes exactly five schemas and no model approval by
   assert.deepEqual(Object.keys(promote.parameters.properties), ['candidate_id'])
   assert.deepEqual(promote.parameters.required, ['candidate_id'])
   assert.equal('approved' in promote.parameters.properties, false)
+  const propose = tools.find((tool) => tool.name === 'evolution_propose')
+  assert.equal('primary_metric' in propose.parameters.properties, false)
+  assert.equal('baseline_value' in propose.parameters.properties, false)
 })
 
 test('only evolution_status declares itself concurrency safe', () => {

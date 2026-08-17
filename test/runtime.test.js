@@ -59,10 +59,10 @@ test('default runtime reviews independent evidence and creates an isolated candi
     mechanism: 'UNCLEAR_APPROVAL', case_ids: setup.caseIds, task_kinds: ['promotion'],
     action: 'Require an exact candidate identifier before promotion.',
     avoid: 'Do not interpret generic continuation language as approval.',
-    primary_metric: 'approval-misclassification-rate', baseline_value: 1,
   })
   assert.equal(proposal.candidateId, 'EVO-20260818-001')
   assert.equal(proposal.state, 'awaiting-validation')
+  assert.equal(proposal.primaryMetric, 'golden-label-error-rate')
   const stable = JSON.parse(await readFile(setup.strategyPath, 'utf8'))
   assert.deepEqual(stable.rules, [])
 })
@@ -75,7 +75,6 @@ test('default runtime validation fails closed when no paired evaluator is config
     mechanism: 'UNCLEAR_APPROVAL', case_ids: setup.caseIds, task_kinds: ['promotion'],
     action: 'Require an exact candidate identifier before promotion.',
     avoid: 'Do not interpret generic continuation language as approval.',
-    primary_metric: 'approval-misclassification-rate', baseline_value: 1,
   })
   const validation = await services.validate({ candidate_id: proposal.candidateId })
   assert.equal(validation.status, 'inconclusive')
@@ -99,16 +98,38 @@ test('runtime promotes only a fully validated candidate and advances stable by o
     mechanism: 'UNCLEAR_APPROVAL', case_ids: setup.caseIds, task_kinds: ['promotion'],
     action: 'Require an exact candidate identifier before promotion.',
     avoid: 'Do not interpret generic continuation language as approval.',
-    primary_metric: 'approval-misclassification-rate', baseline_value: 1,
   })
   const validation = await services.validate({ candidate_id: proposal.candidateId })
   assert.equal(validation.status, 'awaiting-approval')
+  assert.equal(validation.approvalCard.candidateId, proposal.candidateId)
+  assert.equal(validation.approvalCard.hashes.validationReport, validation.validationReportHash)
+  assert.deepEqual(validation.approvalCard.evaluation.support, { count: 3, stableErrors: 3, candidateErrors: 0 })
+  assert.deepEqual(validation.approvalCard.evaluation.heldout, { count: 2, stableErrors: 0, candidateErrors: 0 })
+  assert.equal(validation.approvalCard.guardrails.strictSupportImprovement, true)
+  assert.equal(validation.approvalCard.exactDiff.operation, 'append-one-rule')
+  const status = await services.status()
+  assert.equal(status.candidates[0].approvalCard.candidateId, proposal.candidateId)
+  assert.match(status.projection[`候选方案/${proposal.candidateId}.md`], /人工审批证据/)
   const promotion = await services.promote({ candidate_id: proposal.candidateId })
   assert.equal(promotion.state, 'promoted')
   const stable = JSON.parse(await readFile(setup.strategyPath, 'utf8'))
   assert.equal(stable.stableVersion, 1)
   assert.equal(stable.rules.length, 1)
   assert.equal(stable.rules[0].status, 'stable')
+  assert.equal(stable.rules[0].primaryMetric, 'golden-label-error-rate')
+  assert.equal(stable.rules[0].baselineValue, 1)
+  assert.equal(stable.rules[0].candidateValue, 0)
+})
+
+test('runtime rejects caller-selected metrics that are not bound to the evaluator', async () => {
+  const setup = await fixture()
+  const services = createRuntimeServices({ workspace: setup.workspace, authorityRoot: setup.authorityRoot, evaluator: attachBinding(async () => {}) })
+  await assert.rejects(services.propose({
+    mechanism: 'UNCLEAR_APPROVAL', case_ids: setup.caseIds, task_kinds: ['promotion'],
+    action: 'Require an exact candidate identifier before promotion.',
+    avoid: 'Do not interpret generic continuation language as approval.',
+    primary_metric: 'latency', baseline_value: 999,
+  }), /primary metric is fixed by the evaluation policy/)
 })
 
 test('runtime blocks evolution when observer health is degraded', async () => {
@@ -155,7 +176,6 @@ test('runtime atomically claims one validation attempt across processes', async 
     mechanism: 'UNCLEAR_APPROVAL', case_ids: setup.caseIds, task_kinds: ['promotion'],
     action: 'Require an exact candidate identifier before promotion.',
     avoid: 'Do not interpret generic continuation language as approval.',
-    primary_metric: 'approval-misclassification-rate', baseline_value: 1,
   })
   const running = first.validate({ candidate_id: proposal.candidateId })
   await new Promise((resolve) => setImmediate(resolve))

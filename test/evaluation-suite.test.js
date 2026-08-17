@@ -6,14 +6,17 @@ import { buildEvaluationSuite, runPairedEvaluation } from '../src/evaluation-sui
 const candidate = {
   id: 'EVO-20260817-001',
   createdAt: 100,
-  mechanism: 'unclear-approval',
+  mechanism: 'UNCLEAR_APPROVAL',
+  proposedRule: { primaryMetric: 'golden-label-error-rate' },
 }
+
+const policy = { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3, primaryMetricByMechanism: { UNCLEAR_APPROVAL: 'golden-label-error-rate' } }
 
 function fixture(id, partition, overrides = {}) {
   return {
     id,
     partition,
-    mechanism: partition === 'support' ? 'unclear-approval' : 'near-miss',
+    mechanism: partition === 'support' ? 'UNCLEAR_APPROVAL' : 'near-miss',
     createdAt: 50,
     golden: partition === 'heldout',
     deterministic: true,
@@ -26,24 +29,24 @@ test('buildEvaluationSuite requires three support fixtures, two pre-existing hel
     fixture('SUP-1', 'support'), fixture('SUP-2', 'support'), fixture('SUP-3', 'support'),
     fixture('HOLD-1', 'heldout'), fixture('HOLD-2', 'heldout'),
   ]
-  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy: { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3 } })
+  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy })
 
   assert.deepEqual(suite.support.map((item) => item.id), ['SUP-1', 'SUP-2', 'SUP-3'])
   assert.deepEqual(suite.heldout.map((item) => item.id), ['HOLD-1', 'HOLD-2'])
 
   assert.throws(
-    () => buildEvaluationSuite({ candidate, fixtureRegistry: fixtures.slice(0, 4), policy: { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3 } }),
+    () => buildEvaluationSuite({ candidate, fixtureRegistry: fixtures.slice(0, 4), policy }),
     /at least 2 held-out fixtures/,
   )
   assert.throws(
-    () => buildEvaluationSuite({ candidate, fixtureRegistry: [...fixtures, fixture('GOLD-3', 'heldout', { omitted: true })], policy: { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3 } }),
+    () => buildEvaluationSuite({ candidate, fixtureRegistry: [...fixtures, fixture('GOLD-3', 'heldout', { omitted: true })], policy }),
     /fixture has unknown field: omitted/,
   )
 })
 
 test('runPairedEvaluation gives stable and candidate arms the identical environment and budget', async () => {
   const fixtures = [fixture('SUP-1', 'support'), fixture('SUP-2', 'support'), fixture('SUP-3', 'support'), fixture('HOLD-1', 'heldout'), fixture('HOLD-2', 'heldout')]
-  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy: { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3 } })
+  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy })
   const calls = []
   const report = await runPairedEvaluation({
     suite,
@@ -63,7 +66,7 @@ test('runPairedEvaluation gives stable and candidate arms the identical environm
 
 test('runPairedEvaluation treats provider quota failure as inconclusive instead of regression', async () => {
   const fixtures = [fixture('SUP-1', 'support'), fixture('SUP-2', 'support'), fixture('SUP-3', 'support'), fixture('HOLD-1', 'heldout'), fixture('HOLD-2', 'heldout')]
-  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy: { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3 } })
+  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy })
   const report = await runPairedEvaluation({
     suite,
     environment: { model: 'configured-model', provider: 'configured-provider', toolsHash: 'a'.repeat(64), permissionHash: 'b'.repeat(64) },
@@ -85,7 +88,7 @@ test('runPairedEvaluation treats provider quota failure as inconclusive instead 
 
 test('runPairedEvaluation can execute candidate first without changing arm attribution', async () => {
   const fixtures = [fixture('SUP-1', 'support'), fixture('SUP-2', 'support'), fixture('SUP-3', 'support'), fixture('HOLD-1', 'heldout'), fixture('HOLD-2', 'heldout')]
-  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy: { supportMinimum: 3, heldoutMinimum: 2, stochasticTrials: 3 } })
+  const suite = buildEvaluationSuite({ candidate, fixtureRegistry: fixtures, policy })
   const order = []
   const report = await runPairedEvaluation({
     suite, environment: {}, budget: { maxRuns: 10, maxToolCalls: 0, timeoutMs: 1000 },

@@ -28,14 +28,16 @@ async function healthyFixture() {
   }
   await mkdir(join(presetPath, '..'), { recursive: true })
   await writeFile(presetPath, `- id: deepseek-skill-evolution\n  name: ${JSON.stringify(pluginEntry)}\n  config:\n    workspace: ${JSON.stringify(workspace)}\n    authorityRoot: ${JSON.stringify(dshHome)}\n`, { flag: 'wx' })
-  return { workspace, dshHome, authorityRoot: dshHome, pluginEntry, presetPath, versionReader: () => '0.1.0-rc.6' }
+  return { workspace, dshHome, authorityRoot: dshHome, pluginEntry, presetPath, versionReader: () => '0.1.0-rc.6', authorityGuard() {} }
 }
 
 test('runDoctor reports stable check ids and passes a healthy isolated fixture', async () => {
   const result = await runDoctor(await healthyFixture())
   assert.equal(result.ok, true)
+  assert.equal(result.scope, 'disk-preflight-only')
+  assert.equal(result.mountVerified, false)
   assert.deepEqual(result.checks.map((check) => check.id), [
-    'platform', 'node', 'dsh', 'harness-version', 'authority-root', 'plugin-entry', 'preset', 'skill', 'project-skill-shadow', 'whitelist', 'ledger', 'ledger-anchor', 'candidate-state', 'versions', 'locks', 'dashboard',
+    'platform', 'node', 'dsh', 'harness-version', 'authority-root', 'plugin-entry', 'preset-disk-config', 'skill', 'project-skill-shadow', 'whitelist', 'ledger', 'ledger-anchor', 'candidate-state', 'versions', 'locks', 'projection-presence',
   ])
 })
 
@@ -44,5 +46,5 @@ test('runDoctor is read-only and reports a missing preset row without throwing',
   await writeFile(options.presetPath, '- id: tool-skill\n', { flag: 'w' })
   const result = await runDoctor(options)
   assert.equal(result.ok, false)
-  assert.equal(result.checks.find((check) => check.id === 'preset').ok, false)
+  assert.equal(result.checks.find((check) => check.id === 'preset-disk-config').ok, false)
 })

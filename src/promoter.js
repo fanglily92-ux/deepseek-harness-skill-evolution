@@ -57,29 +57,59 @@ async function restoreJournalSnapshot(snapshot) {
   if (current.hash !== snapshot.hash) await atomicReplace(snapshot.path, content, current.hash)
 }
 
+async function removeTransactionLock(lockPath, pid) {
+  let content
+  try { content = await readFile(lockPath, 'utf8') } catch (error) { if (error.code === 'ENOENT') return; throw error }
+  if (content.trim() !== String(pid)) throw new Error('promotion lock owner mismatch')
+  await unlink(lockPath)
+}
+
+async function readLockPid(lockPath) {
+  let content
+  try { content = await readFile(lockPath, 'utf8') } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  const pid = Number.parseInt(content.trim(), 10)
+  if (!Number.isInteger(pid) || pid < 1 || String(pid) !== content.trim()) throw new Error('invalid promotion lock owner')
+  return pid
+}
+
 function processAlive(pid) {
   if (!Number.isInteger(pid) || pid < 1) return false
   try { process.kill(pid, 0); return true } catch (error) { if (error.code === 'ESRCH') return false; throw error }
 }
 
-export async function recoverPromotionJournal({ journalPath, expectedPaths, expectedLockPath, force = false }) {
+export async function recoverPromotionJournal({ journalPath, expectedPaths, expectedLockPaths, force = false }) {
   let journal
-  try { journal = JSON.parse(await readFile(journalPath, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return { recovered: false }; throw error }
-  if (journal?.schemaVersion !== 1 || !['prepared', 'committed'].includes(journal.phase) || !Array.isArray(journal.snapshots)) throw new Error('invalid promotion journal')
+  try { journal = JSON.parse(await readFile(journalPath, 'utf8')) } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+    let recovered = false
+    for (const lockPath of expectedLockPaths ?? []) {
+      const pid = await readLockPid(lockPath)
+      if (pid === null) continue
+      if (!force && processAlive(pid)) throw new Error('promotion transaction is still active')
+      await removeTransactionLock(lockPath, pid)
+      recovered = true
+    }
+    return { recovered, action: recovered ? 'cleared-orphan-locks' : undefined }
+  }
+  if (journal?.schemaVersion !== 2 || !['prepared', 'committed'].includes(journal.phase) || !Array.isArray(journal.snapshots) || !Array.isArray(journal.lockPaths)) throw new Error('invalid promotion journal')
   if (!Array.isArray(expectedPaths) || expectedPaths.length !== journal.snapshots.length) throw new Error('promotion recovery requires exact expected paths')
+  if (!Array.isArray(expectedLockPaths) || expectedLockPaths.length !== journal.lockPaths.length) throw new Error('promotion recovery requires exact expected locks')
   const actualPaths = journal.snapshots.map((snapshot) => snapshot.path).sort()
   const allowedPaths = [...expectedPaths].sort()
-  if (JSON.stringify(actualPaths) !== JSON.stringify(allowedPaths) || journal.lockPath !== expectedLockPath) throw new Error('promotion journal path binding mismatch')
+  const actualLocks = [...journal.lockPaths].sort()
+  const allowedLocks = [...expectedLockPaths].sort()
+  if (JSON.stringify(actualPaths) !== JSON.stringify(allowedPaths) || JSON.stringify(actualLocks) !== JSON.stringify(allowedLocks)) throw new Error('promotion journal path binding mismatch')
+  if (!force && processAlive(journal.pid)) throw new Error('promotion transaction is still active')
   if (journal.phase === 'committed') {
     for (const [path, expectedHash] of Object.entries(journal.afterHashes ?? {})) {
       if ((await snapshotRegularFile(path)).hash !== expectedHash) throw new Error('committed promotion journal postcondition mismatch')
     }
+    for (const lockPath of journal.lockPaths) await removeTransactionLock(lockPath, journal.pid)
     await unlink(journalPath)
     return { recovered: true, action: 'confirmed-commit' }
   }
-  if (!force && processAlive(journal.pid)) throw new Error('promotion transaction is still active')
   for (const snapshot of [...journal.snapshots].reverse()) await restoreJournalSnapshot(snapshot)
-  try { await unlink(journal.lockPath) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  for (const lockPath of journal.lockPaths) await removeTransactionLock(lockPath, journal.pid)
   await unlink(journalPath)
   return { recovered: true, action: 'rolled-back' }
 }
@@ -91,21 +121,32 @@ export async function promoteCandidate({ candidate, validationReport, strategyPa
   if (validationReport.baselineHash !== candidate.baselineHash) throw new Error('validation baseline hash mismatch')
   if (hashCandidateProposal(candidate.proposedRule) !== candidate.candidateHash) throw new Error('candidate content hash mismatch')
   const expectedCandidateValue = validationReport.scorecard?.supportCandidate / validationReport.scorecard?.supportCount
+  const expectedBaselineValue = validationReport.scorecard?.supportStable / validationReport.scorecard?.supportCount
+  if (!Number.isFinite(expectedBaselineValue) || candidate.proposedRule.baselineValue !== expectedBaselineValue) {
+    throw new Error('baseline metric is not bound to validation scorecard')
+  }
   if (!Number.isFinite(expectedCandidateValue) || candidate.proposedRule.candidateValue !== expectedCandidateValue) {
     throw new Error('candidate metric is not bound to validation scorecard')
   }
   validateStrategyRule(candidate.proposedRule)
   if (candidate.proposedRule.status !== 'candidate') throw new Error('proposed rule is not a candidate')
 
-  return withExclusiveLock(`${strategyPath}.lock`, async () => {
+  const strategyLockPath = `${strategyPath}.lock`
+  const candidateLockPath = candidateStatePath ? `${candidateStatePath}.lock` : null
+  const runTransaction = async () => {
     const oldSnapshot = await snapshotRegularFile(strategyPath)
     const transactionSnapshots = candidateStatePath && journalPath
       ? [oldSnapshot, await snapshotRegularFile(versionsPath), await snapshotRegularFile(candidateStatePath)]
       : null
+    if (transactionSnapshots) {
+      const storedState = JSON.parse(transactionSnapshots[2].content.toString('utf8'))
+      const storedCandidate = storedState.candidates?.find((item) => item.id === candidate.id)
+      if (!storedCandidate || JSON.stringify(storedCandidate) !== JSON.stringify(candidate)) throw new Error('candidate state changed before promotion transaction')
+    }
     let journalSnapshotState
     if (transactionSnapshots) {
       const journal = {
-        schemaVersion: 1, phase: 'prepared', pid: process.pid, lockPath: `${strategyPath}.lock`,
+        schemaVersion: 2, phase: 'prepared', pid: process.pid, lockPaths: [candidateLockPath, strategyLockPath],
         snapshots: transactionSnapshots.map(journalSnapshot), afterHashes: {},
       }
       await writeDurableExclusive(journalPath, journal)
@@ -163,5 +204,9 @@ export async function promoteCandidate({ candidate, validationReport, strategyPa
       await unlink(journalPath)
     }
     return { candidateId: candidate.id, stableVersion: postcondition.stableVersion, hash: committed.hash, backupPath }
-  })
+  }
+  if (candidateLockPath && journalPath) {
+    return withExclusiveLock(candidateLockPath, () => withExclusiveLock(strategyLockPath, runTransaction))
+  }
+  return withExclusiveLock(strategyLockPath, runTransaction)
 }

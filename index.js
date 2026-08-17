@@ -5,7 +5,7 @@ import { createEvolutionTools } from './src/tools.js'
 import { createRuntimeServices } from './src/runtime.js'
 import { createEventObserver } from './src/event-observer.js'
 import { ReceiptLedger } from './src/receipt-ledger.js'
-import { assertAuthorityRootOutsideSandboxTemp, resolveWorkbenchPaths } from './src/paths.js'
+import { assertAuthorityRootOutsideSandboxTemp, assertProjectSkillAbsent, resolveWorkbenchPaths } from './src/paths.js'
 import { createHarnessEvaluator } from './src/harness-evaluator.js'
 import { defineEvolutionTool } from './src/tool-definition.js'
 
@@ -34,6 +34,7 @@ export function apply(ctx, config = {}) {
   if (config.workspace) {
     authorityPaths = resolveWorkbenchPaths(config.workspace, { authorityRoot: config.authorityRoot })
     assertAuthorityRootOutsideSandboxTemp(authorityPaths.authorityRoot)
+    assertProjectSkillAbsent(authorityPaths.projectSkill)
     if (!containedBy(authorityPaths.authorityRoot, pluginRoot)) throw new Error('plugin code must be installed under authorityRoot outside the agent workspace')
     sandboxPolicy = ctx.sandboxPolicy ?? ctx.get?.('sandboxPolicy')
     if (!sandboxPolicy || typeof sandboxPolicy.resolve !== 'function') throw new Error('sandboxPolicy service is required')
@@ -56,6 +57,13 @@ export function apply(ctx, config = {}) {
   }
   disposers.push(ctx.on('tools/pre-execute', async (exec, next) => {
     if (authorityPaths) {
+      if (exec.name.startsWith('evolution_')) {
+        try {
+          assertProjectSkillAbsent(authorityPaths.projectSkill)
+        } catch {
+          return { kind: 'deny', reason: 'A project Skill shadows the protected optimize-work-strategy Skill.' }
+        }
+      }
       const policy = await sandboxPolicy.resolve(exec.agent?.session ? { session: exec.agent.session } : {})
       if (!['read-only', 'workspace-write'].includes(policy?.mode) || resolve(policy.workspaceRoot) !== authorityPaths.workspace) {
         return { kind: 'deny', reason: 'Skill evolution requires a workspace-confined agent session.' }
