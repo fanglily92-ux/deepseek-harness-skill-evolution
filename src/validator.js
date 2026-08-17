@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { hashCanonical } from './integrity.js'
 
 const FORBIDDEN_FIELDS = new Set(['rawprompt', 'rawoutput', 'toolarguments', 'tooloutput'])
 
@@ -18,11 +19,11 @@ function failure(candidateId, baselineHash, reason, scorecard = {}) {
   return { pass: false, candidateId, baselineHash, reason, scorecard }
 }
 
-export function validateCandidate({ candidateId, baselineHash, candidateHash, evaluationReport }) {
+export function validateCandidate({ candidateId, baselineHash, candidateHash, evaluationBinding, evaluationReport }) {
   rejectForbidden(evaluationReport)
   if (evaluationReport.binding?.candidateHash !== candidateHash) return failure(candidateId, baselineHash, 'candidate hash mismatch')
-  if (evaluationReport.binding?.baselineHash !== baselineHash) return failure(candidateId, baselineHash, 'evaluation baseline hash mismatch')
-  if (!/^[a-f0-9]{64}$/.test(evaluationReport.binding?.fixtureManifestHash ?? '')) return failure(candidateId, baselineHash, 'fixture manifest is not bound')
+  if (evaluationReport.binding?.baselineCatalogHash !== baselineHash) return failure(candidateId, baselineHash, 'evaluation baseline hash mismatch')
+  if (!evaluationBinding || hashCanonical(evaluationReport.binding) !== hashCanonical(evaluationBinding)) return failure(candidateId, baselineHash, 'evaluation evidence binding mismatch')
   if (evaluationReport.binding?.evaluatorVersion !== 'golden-label-v1') return failure(candidateId, baselineHash, 'evaluator version mismatch')
   if (evaluationReport.status !== 'complete') return failure(candidateId, baselineHash, 'evaluation incomplete')
   if (evaluationReport.budget?.exhausted) return failure(candidateId, baselineHash, 'evaluation budget exhausted')

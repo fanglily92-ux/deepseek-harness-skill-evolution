@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -97,5 +97,24 @@ test('ReceiptLedger refuses to append after opening a corrupted chain', async ()
   const reopened = await ReceiptLedger.open({ receipts: path })
   await assert.rejects(reopened.append(receipt(2)), /receipt hash chain mismatch at line 1/)
   assert.equal((await readFile(path, 'utf8')).trimEnd().split('\n').length, 1)
+  await reopened.close()
+})
+
+test('ReceiptLedger anchor detects whole-chain truncation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'evolution-ledger-anchor-'))
+  const paths = {
+    authorityRoot: root,
+    receipts: join(root, 'receipts.jsonl'),
+    receiptAnchor: join(root, 'receipts.anchor.json'),
+  }
+  const ledger = await ReceiptLedger.open(paths)
+  await ledger.append(receipt(1))
+  await ledger.append(receipt(2))
+  await ledger.close()
+
+  await truncate(paths.receipts, 0)
+
+  const reopened = await ReceiptLedger.open(paths)
+  await assert.rejects(reopened.verify(), /anchor mismatch/)
   await reopened.close()
 })

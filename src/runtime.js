@@ -1,10 +1,11 @@
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { dirname } from 'node:path'
 
 import { atomicReplace, snapshotRegularFile, withExclusiveLock } from './atomic-files.js'
 import { buildCandidate, buildPattern } from './candidate-builder.js'
 import { parseStrategyCatalog, appendCandidateRule } from './strategy-rules.js'
-import { hashCatalog, promoteCandidate } from './promoter.js'
+import { hashCatalog, promoteCandidate, recoverPromotionJournal } from './promoter.js'
 import { ReceiptLedger } from './receipt-ledger.js'
 import { assertContainedPathNoSymlinks, resolveWorkbenchPaths } from './paths.js'
 import { validateCandidate } from './validator.js'
@@ -54,7 +55,7 @@ async function updateCandidateState(root, path, mutate) {
     const next = await mutate(structuredClone(current))
     await atomicReplace(path, `${JSON.stringify(next, null, 2)}\n`, snapshot.hash)
     return next
-  })
+  }, { waitMs: 2000 })
 }
 
 async function loadReceipts(paths) {
@@ -94,23 +95,32 @@ function findCandidate(state, candidateId) {
   return candidate
 }
 
-export function createRuntimeServices({ workspace, evaluator, now = Date.now, observerHealth = { status: 'healthy' } }) {
-  const paths = resolveWorkbenchPaths(workspace)
-  const strategyPath = join(workspace, '.dsh', 'skills', 'optimize-work-strategy', 'references', 'strategies.yaml')
-  const backupDirectory = join(workspace, 'logs', 'DeepSeek-Harness自进化', 'state', 'backups')
+export function createRuntimeServices({ workspace, authorityRoot, evaluator, now = Date.now, observerHealth = { status: 'healthy' } }) {
+  const paths = resolveWorkbenchPaths(workspace, { authorityRoot })
+  const strategyPath = paths.strategy
+  const backupDirectory = paths.backups
 
   function assertObserverHealthy() {
     if (observerHealth.status !== 'healthy') throw new Error(`feedback observer unavailable: ${observerHealth.lastErrorCode ?? observerHealth.status}`)
   }
 
   async function assertAuthorityPaths() {
-    for (const target of [paths.receipts, paths.candidates, paths.versions, strategyPath, backupDirectory]) {
-      await assertContainedPathNoSymlinks(workspace, target, { allowMissingLeaf: true })
+    for (const target of [paths.receipts, paths.receiptAnchor, paths.candidates, paths.versions, paths.promotionJournal, strategyPath, backupDirectory]) {
+      await assertContainedPathNoSymlinks(paths.authorityRoot, target, { allowMissingLeaf: true })
     }
+  }
+
+  async function ensureRecovered() {
+    await recoverPromotionJournal({
+      journalPath: paths.promotionJournal,
+      expectedPaths: [strategyPath, paths.versions, paths.candidates],
+      expectedLockPath: `${strategyPath}.lock`,
+    })
   }
 
   return {
     async status() {
+      await ensureRecovered()
       await assertAuthorityPaths()
       let ledgerHealth = { ok: true, count: 0, lastHash: '0'.repeat(64) }
       try {
@@ -120,7 +130,7 @@ export function createRuntimeServices({ workspace, evaluator, now = Date.now, ob
         if (error.code !== 'ENOENT') throw error
       }
       const catalog = parseStrategyCatalog(await readFile(strategyPath, 'utf8'))
-      const state = await readCandidateStateOnly(workspace, paths.candidates)
+      const state = await readCandidateStateOnly(paths.authorityRoot, paths.candidates)
       return {
         health: observerHealth.status,
         observer: { status: observerHealth.status, lastErrorCode: observerHealth.lastErrorCode ?? null, lastSuccessSeq: observerHealth.lastSuccessSeq ?? null },
@@ -132,6 +142,7 @@ export function createRuntimeServices({ workspace, evaluator, now = Date.now, ob
     },
 
     async review({ case_ids: caseIds }) {
+      await ensureRecovered()
       assertObserverHealthy()
       const cases = await reviewCases(paths, caseIds)
       return {
@@ -144,13 +155,14 @@ export function createRuntimeServices({ workspace, evaluator, now = Date.now, ob
     },
 
     async propose(args) {
+      await ensureRecovered()
       assertObserverHealthy()
       const cases = await reviewCases(paths, args.case_ids)
       const mechanism = cases[0].evidence.errorClass
       if (args.mechanism !== mechanism) throw new Error('proposed mechanism does not match reviewed evidence')
       if (!Number.isFinite(args.baseline_value) || args.baseline_value < 0) throw new Error('baseline_value must be a non-negative finite number')
       const catalog = parseStrategyCatalog(await readFile(strategyPath, 'utf8'))
-      const existing = await readCandidateState(workspace, paths.candidates)
+      const existing = await readCandidateState(paths.authorityRoot, paths.candidates)
       const date = currentDate(now)
       const stamp = date.toISOString().slice(0, 10).replaceAll('-', '')
       const sequence = existing.candidates.filter((candidate) => candidate.id.startsWith(`EVO-${stamp}-`)).length + 1
@@ -168,9 +180,11 @@ export function createRuntimeServices({ workspace, evaluator, now = Date.now, ob
         introducedBy: candidateId,
       }
       appendCandidateRule(catalog, proposedRule)
+      if (typeof evaluator?.prepareCandidateBinding !== 'function') throw new Error('evaluator binding provider unavailable')
+      const evaluationBinding = await evaluator.prepareCandidateBinding()
       const pattern = buildPattern({ skillName: cases[0].skillName, mechanism, caseIds: args.case_ids, proposedRule })
-      const candidate = buildCandidate({ pattern, baselineCatalog: catalog, date, sequence })
-      await updateCandidateState(workspace, paths.candidates, (state) => {
+      const candidate = buildCandidate({ pattern, baselineCatalog: catalog, evaluationBinding, date, sequence })
+      await updateCandidateState(paths.authorityRoot, paths.candidates, (state) => {
         if (state.candidates.some((item) => item.id === candidate.id)) throw new Error('candidate id already exists')
         state.candidates.push(candidate)
         return state
@@ -179,12 +193,21 @@ export function createRuntimeServices({ workspace, evaluator, now = Date.now, ob
     },
 
     async validate({ candidate_id: candidateId }, exec) {
+      await ensureRecovered()
       assertObserverHealthy()
-      const state = await readCandidateState(workspace, paths.candidates)
-      const candidate = findCandidate(state, candidateId)
-      if (candidate.state !== 'awaiting-validation') throw new Error('candidate is not awaiting validation')
+      const attemptId = randomUUID()
+      let candidate
+      await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => {
+        const target = findCandidate(next, candidateId)
+        if (target.state !== 'awaiting-validation') throw new Error('candidate is not awaiting validation')
+        target.state = 'validating'
+        target.validationAttempts += 1
+        target.validationAttemptId = attemptId
+        candidate = structuredClone(target)
+        return next
+      })
       if (typeof evaluator !== 'function') {
-        await updateCandidateState(workspace, paths.candidates, (next) => { const target = findCandidate(next, candidateId); target.validationAttempts += 1; target.state = 'rejected'; return next })
+        await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => { const target = findCandidate(next, candidateId); if (target.validationAttemptId !== attemptId) throw new Error('validation attempt changed'); target.state = 'rejected'; delete target.validationAttemptId; return next })
         return { candidateId, status: 'inconclusive', reason: 'paired evaluator unavailable', stableChanged: false }
       }
       let evaluationReport
@@ -192,47 +215,57 @@ export function createRuntimeServices({ workspace, evaluator, now = Date.now, ob
         evaluationReport = await evaluator(structuredClone(candidate), exec)
       } catch (error) {
         const code = typeof error?.code === 'string' && /^[A-Z0-9_-]{1,32}$/.test(error.code) ? error.code : 'EVALUATION_ERROR'
-        await updateCandidateState(workspace, paths.candidates, (next) => { const target = findCandidate(next, candidateId); target.validationAttempts += 1; target.state = 'rejected'; return next })
+        await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => { const target = findCandidate(next, candidateId); if (target.validationAttemptId !== attemptId) throw new Error('validation attempt changed'); target.state = 'rejected'; delete target.validationAttemptId; return next })
         return { candidateId, status: 'inconclusive', reason: code, stableChanged: false }
       }
-      const validation = validateCandidate({ candidateId, baselineHash: candidate.baselineHash, candidateHash: candidate.candidateHash, evaluationReport })
+      const validation = validateCandidate({ candidateId, baselineHash: candidate.baselineHash, candidateHash: candidate.candidateHash, evaluationBinding: candidate.evaluationBinding, evaluationReport })
       if (!validation.pass) {
-        await updateCandidateState(workspace, paths.candidates, (next) => { const target = findCandidate(next, candidateId); target.validationAttempts += 1; target.state = 'rejected'; return next })
+        await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => { const target = findCandidate(next, candidateId); if (target.validationAttemptId !== attemptId) throw new Error('validation attempt changed'); target.state = 'rejected'; target.evaluationReport = evaluationReport; target.validationReport = validation; delete target.validationAttemptId; return next })
         return { candidateId, status: 'rejected', reason: validation.reason, stableChanged: false }
       }
       const support = evaluationReport.fixtureResults.filter((result) => result.partition === 'support')
-      await updateCandidateState(workspace, paths.candidates, (next) => {
+      await updateCandidateState(paths.authorityRoot, paths.candidates, (next) => {
         const target = findCandidate(next, candidateId)
-        if (target.state !== 'awaiting-validation') throw new Error('candidate state changed during validation')
+        if (target.state !== 'validating' || target.validationAttemptId !== attemptId) throw new Error('candidate state changed during validation')
         target.state = 'awaiting-approval'
-        target.validationAttempts += 1
         target.proposedRule.candidateValue = validation.scorecard.supportCandidate / validation.scorecard.supportCount
         target.validationReportHash = validation.reportHash
+        target.evaluationReport = evaluationReport
         target.validationReport = validation
+        delete target.validationAttemptId
         return next
       })
       return { candidateId, status: 'awaiting-approval', validationReportHash: validation.reportHash, stableChanged: false }
     },
 
     async promote({ candidate_id: candidateId }) {
+      await ensureRecovered()
       assertObserverHealthy()
       await assertAuthorityPaths()
       await loadReceipts(paths)
-      const state = await readCandidateState(workspace, paths.candidates)
+      const state = await readCandidateState(paths.authorityRoot, paths.candidates)
       const candidate = findCandidate(state, candidateId)
       if (candidate.state !== 'awaiting-approval') throw new Error('candidate is not awaiting approval')
-      await ensureFile(workspace, paths.versions, '')
+      if (typeof evaluator?.verifyCandidateBinding !== 'function') throw new Error('evaluator binding verifier unavailable')
+      await evaluator.verifyCandidateBinding(structuredClone(candidate))
+      const revalidated = validateCandidate({
+        candidateId: candidate.id,
+        baselineHash: candidate.baselineHash,
+        candidateHash: candidate.candidateHash,
+        evaluationBinding: candidate.evaluationBinding,
+        evaluationReport: candidate.evaluationReport,
+      })
+      if (!revalidated.pass || revalidated.reportHash !== candidate.validationReportHash) throw new Error('persisted evaluation report no longer validates')
+      await ensureFile(paths.authorityRoot, paths.versions, '')
       const result = await promoteCandidate({
         candidate,
         validationReport: candidate.validationReport,
         strategyPath,
         versionsPath: paths.versions,
+        candidateStatePath: paths.candidates,
+        journalPath: paths.promotionJournal,
         backupDirectory,
         now: () => currentDate(now).getTime(),
-      })
-      await updateCandidateState(workspace, paths.candidates, (next) => {
-        findCandidate(next, candidateId).state = 'promoted'
-        return next
       })
       return { ...result, state: 'promoted' }
     },

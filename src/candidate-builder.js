@@ -13,17 +13,25 @@ export function buildPattern({ skillName, mechanism, caseIds, proposedRule }) {
   return Object.freeze({ skillName, mechanism, caseIds: [...caseIds], proposedRule: structuredClone(proposedRule) })
 }
 
-export function buildCandidate({ pattern, baselineCatalog, date, sequence }) {
+export function buildCandidate({ pattern, baselineCatalog, evaluationBinding, date, sequence }) {
   const id = createCandidateId(date, sequence)
   if (pattern.proposedRule.introducedBy !== id) throw new Error('proposed rule introducedBy must match candidate id')
   const baselineHash = hashCanonical(baselineCatalog)
+  if (!evaluationBinding || typeof evaluationBinding !== 'object') throw new Error('evaluationBinding is required before candidate creation')
+  const candidateHash = hashCandidateProposal(pattern.proposedRule)
+  const completeBinding = {
+    ...structuredClone(evaluationBinding),
+    baselineCatalogHash: baselineHash,
+    candidateHash,
+  }
   const candidate = {
     schemaVersion: 1,
     id,
     skillName: pattern.skillName,
     state: 'awaiting-validation',
     baselineHash,
-    candidateHash: hashCandidateProposal(pattern.proposedRule),
+    candidateHash,
+    evaluationBinding: completeBinding,
     validationAttempts: 0,
     proposedRule: structuredClone(pattern.proposedRule),
     caseIds: [...pattern.caseIds],

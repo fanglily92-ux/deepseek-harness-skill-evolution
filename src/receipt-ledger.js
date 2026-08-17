@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { mkdir, open } from 'node:fs/promises'
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 import { withExclusiveLock } from './atomic-files.js'
@@ -22,24 +22,60 @@ function hashRow(rowWithoutHash) {
 export class ReceiptLedger {
   #root
   #path
+  #anchorPath
   #tail = Promise.resolve()
 
   static async open(paths, { create = true } = {}) {
     if (!paths || typeof paths.receipts !== 'string') throw new TypeError('paths.receipts is required')
-    const root = paths.workspace ?? dirname(paths.receipts)
+    const root = paths.authorityRoot ?? paths.workspace ?? dirname(paths.receipts)
+    const anchorPath = paths.receiptAnchor ?? `${paths.receipts}.anchor.json`
     await assertContainedPathNoSymlinks(root, paths.receipts, { allowMissingLeaf: create })
+    await assertContainedPathNoSymlinks(root, anchorPath, { allowMissingLeaf: create })
     await mkdir(dirname(paths.receipts), { recursive: true })
     await assertContainedPathNoSymlinks(root, dirname(paths.receipts))
     const noFollow = constants.O_NOFOLLOW ?? 0
     const flags = create ? constants.O_CREAT | constants.O_RDWR | constants.O_APPEND | noFollow : constants.O_RDONLY | noFollow
     const handle = await open(paths.receipts, flags, 0o600)
     await handle.close()
-    return new ReceiptLedger(root, paths.receipts)
+    if (create) {
+      try {
+        await writeFile(anchorPath, `${JSON.stringify({ schemaVersion: 1, count: 0, lastHash: '0'.repeat(64) })}\n`, { flag: 'wx', mode: 0o600 })
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error
+      }
+    }
+    return new ReceiptLedger(root, paths.receipts, anchorPath)
   }
 
-  constructor(root, path) {
+  constructor(root, path, anchorPath) {
     this.#root = root
     this.#path = path
+    this.#anchorPath = anchorPath
+  }
+
+  async #readAnchor() {
+    await assertContainedPathNoSymlinks(this.#root, this.#anchorPath)
+    const anchor = JSON.parse(await readFile(this.#anchorPath, 'utf8'))
+    if (anchor?.schemaVersion !== 1 || !Number.isInteger(anchor.count) || anchor.count < 0 || !/^[a-f0-9]{64}$/.test(anchor.lastHash ?? '')) throw new Error('invalid receipt anchor')
+    return anchor
+  }
+
+  async #verifyAnchor(verified) {
+    const anchor = await this.#readAnchor()
+    if (anchor.count !== verified.count || anchor.lastHash !== verified.lastHash) throw new Error('receipt anchor mismatch')
+  }
+
+  async #writeAnchor(previous, next) {
+    const handle = await open(this.#anchorPath, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0))
+    try {
+      const current = JSON.parse(await handle.readFile('utf8'))
+      if (current.count !== previous.count || current.lastHash !== previous.lastHash) throw new Error('receipt anchor changed during append')
+      await handle.truncate(0)
+      await handle.write(`${JSON.stringify({ schemaVersion: 1, count: next.count, lastHash: next.lastHash })}\n`, 0, 'utf8')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
   }
 
   append(receipt) {
@@ -50,10 +86,12 @@ export class ReceiptLedger {
         const handle = await open(this.#path, constants.O_RDWR | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0))
         try {
           const verified = await this.#verifyHandle(handle)
+          await this.#verifyAnchor(verified)
           const core = { schemaVersion: SCHEMA_VERSION, previousHash: verified.lastHash, payload: receipt }
           const hash = hashRow(core)
           await handle.appendFile(`${JSON.stringify({ ...core, hash })}\n`, 'utf8')
           await handle.sync()
+          await this.#writeAnchor(verified, { count: verified.count + 1, lastHash: hash })
           return hash
         } finally {
           await handle.close()
@@ -70,7 +108,9 @@ export class ReceiptLedger {
       await assertContainedPathNoSymlinks(this.#root, this.#path)
       const handle = await open(this.#path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
       try {
-        return await this.#verifyHandle(handle)
+        const verified = await this.#verifyHandle(handle)
+        await this.#verifyAnchor(verified)
+        return verified
       } finally {
         await handle.close()
       }
@@ -84,7 +124,8 @@ export class ReceiptLedger {
       const handle = await open(this.#path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
       try {
         const content = await handle.readFile('utf8')
-        this.#verifyContent(content)
+        const verified = this.#verifyContent(content)
+        await this.#verifyAnchor(verified)
         return content.trimEnd() ? content.trimEnd().split('\n').map((line) => JSON.parse(line).payload) : []
       } finally {
         await handle.close()

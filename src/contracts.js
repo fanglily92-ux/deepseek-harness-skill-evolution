@@ -5,6 +5,7 @@ export const RECEIPT_OUTCOMES = Object.freeze(['success', 'partial', 'failure', 
 export const CANDIDATE_STATES = Object.freeze([
   'observing',
   'awaiting-validation',
+  'validating',
   'awaiting-approval',
   'promoted',
   'rejected',
@@ -72,7 +73,7 @@ export function assertCandidate(candidate) {
   }
   assertExactFields(
     candidate,
-    new Set(['schemaVersion', 'id', 'skillName', 'state', 'baselineHash', 'candidateHash', 'validationAttempts', 'proposedRule', 'caseIds', 'createdAt']),
+    new Set(['schemaVersion', 'id', 'skillName', 'state', 'baselineHash', 'candidateHash', 'evaluationBinding', 'validationAttempts', 'proposedRule', 'caseIds', 'createdAt']),
     'candidate',
   )
   if (candidate.schemaVersion !== SCHEMA_VERSION) throw new Error('unsupported candidate schemaVersion')
@@ -81,6 +82,12 @@ export function assertCandidate(candidate) {
   if (!CANDIDATE_STATES.includes(candidate.state)) throw new Error('invalid candidate state')
   if (!SHA256_PATTERN.test(candidate.baselineHash)) throw new Error('invalid candidate baselineHash')
   if (!SHA256_PATTERN.test(candidate.candidateHash)) throw new Error('invalid candidate candidateHash')
+  if (!candidate.evaluationBinding || typeof candidate.evaluationBinding !== 'object' || Array.isArray(candidate.evaluationBinding)) throw new Error('invalid candidate evaluationBinding')
+  for (const field of ['baselineCatalogHash', 'candidateHash', 'stableSkillHash', 'stableStrategiesHash', 'fixtureManifestHash', 'evaluationPolicyHash', 'evaluatorCodeHash']) {
+    if (!SHA256_PATTERN.test(candidate.evaluationBinding[field] ?? '')) throw new Error(`invalid candidate evaluationBinding.${field}`)
+  }
+  if (candidate.evaluationBinding.baselineCatalogHash !== candidate.baselineHash || candidate.evaluationBinding.candidateHash !== candidate.candidateHash) throw new Error('candidate evaluationBinding does not match candidate hashes')
+  if (!Array.isArray(candidate.evaluationBinding.fixtureIds) || candidate.evaluationBinding.fixtureIds.length === 0) throw new Error('candidate evaluationBinding.fixtureIds is required')
   if (!Number.isInteger(candidate.validationAttempts) || candidate.validationAttempts < 0) throw new Error('invalid candidate validationAttempts')
   if (!candidate.proposedRule || typeof candidate.proposedRule !== 'object' || Array.isArray(candidate.proposedRule)) throw new Error('invalid candidate proposedRule')
   if (!Array.isArray(candidate.caseIds) || candidate.caseIds.length < 3) throw new Error('candidate requires at least three independent case ids')

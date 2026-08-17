@@ -28,6 +28,7 @@ export function createEventObserver({ ledger, whitelist, now = Date.now }) {
       const turn = Number.isInteger(event?.data?.turn) ? event.data.turn : openTurns.get(sessionHash)
       if (!Number.isInteger(turn)) return
       const key = `${sessionHash}:${turn}`
+      const callKey = (callId) => `${key}:${callId}`
       let state = turns.get(key)
       if (!state) {
         state = {
@@ -60,7 +61,7 @@ export function createEventObserver({ ledger, whitelist, now = Date.now }) {
         } catch {
           requested = null
         }
-        if (requested && typeof requested.name === 'string' && whitelist.has(requested.name)) pendingSkills.set(event.data.callId, requested.name)
+        if (requested && typeof requested.name === 'string' && whitelist.has(requested.name)) pendingSkills.set(callKey(event.data.callId), requested.name)
       } else if (event.type === 'tool/call' && state.active) {
         const name = typeof event.data?.name === 'string' ? event.data.name : ''
         if (name === 'evolution_promote') state.promotionAttempted = true
@@ -71,12 +72,13 @@ export function createEventObserver({ ledger, whitelist, now = Date.now }) {
         const callId = event.data?.message?.source?.callId
         const failed = Boolean(event.data?.error)
           || event.data?.message?.content?.some((block) => block.type === 'tool-result' && block.isError === true)
-        if (pendingSkills.has(callId)) {
+        const pendingKey = callKey(callId)
+        if (pendingSkills.has(pendingKey)) {
           if (!failed) {
             state.active = true
-            state.skillName = pendingSkills.get(callId)
+            state.skillName = pendingSkills.get(pendingKey)
           }
-          pendingSkills.delete(callId)
+          pendingSkills.delete(pendingKey)
         } else if (state.active && state.calls.has(callId)) {
           if (failed) state.toolFailures += 1
           state.calls.delete(callId)
@@ -84,6 +86,7 @@ export function createEventObserver({ ledger, whitelist, now = Date.now }) {
       } else if (event.type === 'turn/end') {
         turns.delete(key)
         openTurns.delete(sessionHash)
+        for (const pendingKey of pendingSkills.keys()) if (pendingKey.startsWith(`${key}:`)) pendingSkills.delete(pendingKey)
         if (!state.active) return
         const unclearApproval = state.promotionAttempted && state.promotionApproval !== 'exact'
         const failed = unclearApproval || state.userSignal === 'negative' || state.toolFailures > 0
@@ -107,7 +110,7 @@ export function createEventObserver({ ledger, whitelist, now = Date.now }) {
           createdAt: now(),
         })
       }
-      observe.health = { ok: true, lastError: null }
+      if (observe.health.ok) observe.health = { ok: true, lastError: null }
     } catch (error) {
       observe.health = { ok: false, lastError: error instanceof Error ? error.name : 'UnknownError' }
       throw error

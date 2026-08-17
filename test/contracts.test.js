@@ -96,6 +96,14 @@ test('assertCandidate requires an exact state, baseline hash, and independent ca
     state: 'awaiting-validation',
     baselineHash: 'b'.repeat(64),
     candidateHash: 'c'.repeat(64),
+    evaluationBinding: {
+      schemaVersion: 1,
+      baselineCatalogHash: 'b'.repeat(64), candidateHash: 'c'.repeat(64),
+      stableSkillHash: 'd'.repeat(64), stableStrategiesHash: 'e'.repeat(64),
+      fixtureManifestHash: 'f'.repeat(64), evaluationPolicyHash: '1'.repeat(64),
+      evaluatorCodeHash: '2'.repeat(64), evaluatorVersion: 'golden-label-v1',
+      fixtureIds: ['SUP-1', 'SUP-2', 'SUP-3', 'HOLD-1', 'HOLD-2'],
+    },
     validationAttempts: 0,
     proposedRule: { id: 'rule-001' },
     caseIds: [

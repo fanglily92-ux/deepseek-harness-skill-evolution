@@ -10,13 +10,28 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'evolution-install-'))
   const dshHome = join(root, '.dsh')
   const workspace = join(root, 'workspace')
-  const pluginEntry = join(workspace, 'plugin', 'index.js')
+  const sourceRoot = join(root, 'source')
   const presetPath = join(dshHome, '.agent-presets', 'video-reader', 'agent.cordis.yml')
-  await mkdir(join(workspace, 'plugin'), { recursive: true })
+  await mkdir(workspace, { recursive: true })
   await mkdir(join(dshHome, '.agent-presets', 'video-reader'), { recursive: true })
-  await writeFile(pluginEntry, 'export const name = "test"\n', { flag: 'wx' })
+  const sources = {
+    'index.js': 'export const name = "test"\n',
+    'src/a.js': 'export const a = 1\n',
+    'config/a.json': '{}\n',
+    'eval/a.json': '{}\n',
+    'skills/optimize-work-strategy/SKILL.md': '# Skill\n',
+    'skills/optimize-work-strategy/references/strategies.yaml': '{"schemaVersion":1,"stableVersion":0,"rules":[]}\n',
+    'scripts/a.js': '\n',
+    'package.json': '{"name":"deepseek-harness-skill-evolution","version":"0.1.0"}\n',
+    'package-lock.json': '{}\n', 'README.md': '# Readme\n', 'LICENSE': 'MIT\n', 'THIRD_PARTY_NOTICES.md': '# Notices\n',
+  }
+  for (const [path, content] of Object.entries(sources)) {
+    const target = join(sourceRoot, path)
+    await mkdir(join(target, '..'), { recursive: true })
+    await writeFile(target, content, { flag: 'wx' })
+  }
   await writeFile(presetPath, '- id: tool-skill\n  name: "@deepseek-ai/dsh-tool-skill"\n', { flag: 'wx' })
-  return { root, dshHome, workspace, pluginEntry, presetPath, harnessVersion: '0.1.0-rc.6', nodeVersion: '22.0.0' }
+  return { root, dshHome, workspace, sourceRoot, presetPath, harnessVersion: '0.1.0-rc.6', nodeVersion: '22.0.0' }
 }
 
 test('planInstall is zero-write and returns an exact append-only preview', async () => {
@@ -28,7 +43,10 @@ test('planInstall is zero-write and returns an exact append-only preview', async
   assert.equal(plan.writeRequired, true)
   assert.match(plan.appendBlock, /id: deepseek-skill-evolution/)
   assert.match(plan.appendBlock, /config:\n    workspace:/)
+  assert.match(plan.appendBlock, /authorityRoot:/)
   assert.match(plan.beforeHash, /^[a-f0-9]{64}$/)
+  assert.match(plan.sourceManifestHash, /^[a-f0-9]{64}$/)
+  await assert.rejects(readFile(plan.pluginEntry), /ENOENT/)
 })
 
 test('detectHarnessVersion uses the real dsh command output and fails closed', () => {
@@ -40,22 +58,31 @@ test('detectHarnessVersion uses the real dsh command output and fails closed', (
 
 test('installHarness creates a backup and appends exactly one plugin row in a temporary DSH home', async () => {
   const options = await fixture()
-  const result = await installHarness({ ...options, expectedPresetHash: (await planInstall(options)).beforeHash })
+  const preview = await planInstall(options)
+  const result = await installHarness({ ...options, expectedPresetHash: preview.beforeHash, expectedSourceManifestHash: preview.sourceManifestHash })
   const installed = await readFile(options.presetPath, 'utf8')
 
   assert.equal((installed.match(/id: deepseek-skill-evolution/g) ?? []).length, 1)
   assert.equal(await readFile(result.backupPath, 'utf8'), '- id: tool-skill\n  name: "@deepseek-ai/dsh-tool-skill"\n')
+  assert.equal(await readFile(result.pluginEntry, 'utf8'), 'export const name = "test"\n')
+  assert.equal(await readFile(join(result.skillDirectory, 'SKILL.md'), 'utf8'), '# Skill\n')
 })
 
-test('planInstall rejects duplicate rows and symlink plugin entries', async () => {
+test('planInstall rejects project Skill shadowing and symlinked source files', async () => {
   const options = await fixture()
-  const plan = await planInstall(options)
-  await installHarness({ ...options, expectedPresetHash: plan.beforeHash })
-  await assert.rejects(planInstall(options), /already contains deepseek-skill-evolution/)
+  await mkdir(join(options.workspace, '.dsh', 'skills', 'optimize-work-strategy'), { recursive: true })
+  await assert.rejects(planInstall(options), /shadows the protected user Skill/)
 
   const other = await fixture()
-  const real = other.pluginEntry
-  const linked = join(other.workspace, 'plugin', 'linked.js')
+  const real = join(other.sourceRoot, 'index.js')
+  const linked = join(other.sourceRoot, 'src', 'linked.js')
   await symlink(real, linked)
-  await assert.rejects(planInstall({ ...other, pluginEntry: linked }), /symlink/)
+  await assert.rejects(planInstall(other), /symlink/)
+})
+
+test('planInstall rejects a symlinked authority parent', async () => {
+  const options = await fixture()
+  const outside = await mkdtemp(join(tmpdir(), 'evolution-install-outside-'))
+  await symlink(outside, join(options.dshHome, 'plugins'))
+  await assert.rejects(planInstall(options), /symlink/)
 })

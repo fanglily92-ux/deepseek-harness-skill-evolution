@@ -8,8 +8,8 @@ import { detectHarnessVersion, installHarness, planInstall } from '../src/instal
 function usage() {
   return [
     'Usage:',
-    '  node scripts/install-harness.js --workspace <absolute-path> [--dsh-home <path>] [--plugin-entry <path>]',
-    '  node scripts/install-harness.js --workspace <absolute-path> --apply --expected-preset-hash <sha256>',
+    '  node scripts/install-harness.js --workspace <absolute-path> [--dsh-home <path>]',
+    '  node scripts/install-harness.js --workspace <absolute-path> --apply --expected-preset-hash <sha256> --expected-source-manifest-hash <sha256>',
     '',
     'The default mode is a zero-write preview. --apply requires the exact preview hash.',
   ].join('\n')
@@ -39,7 +39,7 @@ async function main() {
   const options = {
     workspace: resolve(args.workspace),
     dshHome,
-    pluginEntry: resolve(args['plugin-entry'] ?? join(scriptRoot, 'index.js')),
+    sourceRoot: scriptRoot,
     presetPath: join(dshHome, '.agent-presets', 'video-reader', 'agent.cordis.yml'),
     harnessVersion: detectHarnessVersion(),
     nodeVersion: process.versions.node,
@@ -51,17 +51,23 @@ async function main() {
       presetPath: plan.presetPath,
       beforeHash: plan.beforeHash,
       afterHash: plan.afterHash,
+      sourceManifestHash: plan.sourceManifestHash,
+      pluginDirectory: plan.pluginDirectory,
+      skillDirectory: plan.skillDirectory,
       appendBlock: plan.appendBlock,
       writePerformed: false,
     }, null, 2)}\n`)
     return
   }
   if (!args['expected-preset-hash']) throw new Error('--apply requires --expected-preset-hash from an approved preview')
-  const result = await installHarness({ ...options, expectedPresetHash: args['expected-preset-hash'] })
+  if (!args['expected-source-manifest-hash']) throw new Error('--apply requires --expected-source-manifest-hash from an approved preview')
+  const result = await installHarness({ ...options, expectedPresetHash: args['expected-preset-hash'], expectedSourceManifestHash: args['expected-source-manifest-hash'] })
   process.stdout.write(`${JSON.stringify({
     mode: 'applied',
     presetPath: result.presetPath,
     backupPath: result.backupPath,
+    pluginDirectory: result.pluginDirectory,
+    skillDirectory: result.skillDirectory,
     committedHash: result.committedHash,
   }, null, 2)}\n`)
 }

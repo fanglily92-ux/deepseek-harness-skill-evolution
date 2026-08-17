@@ -27,6 +27,7 @@
     "doctor": "node scripts/doctor.js",
     "scan:sensitive": "node scripts/scan-sensitive.js",
     "check:licenses": "node scripts/check-licenses.js",
+    "verify:authority": "node scripts/verify-harness-boundary.js",
     "release:check": "npm test && npm run check && npm run scan:sensitive && npm run check:licenses"
   }
 }

@@ -7,20 +7,22 @@ import { join } from 'node:path'
 import {
   assertContainedRegularFile,
   assertContainedPathNoSymlinks,
+  assertAuthorityRootOutsideSandboxTemp,
   resolveWorkbenchPaths,
 } from '../src/paths.js'
 
 test('resolveWorkbenchPaths returns only paths contained by the workspace', () => {
-  const paths = resolveWorkbenchPaths('/workspace/lily_ai', { homePath: '/home/tester' })
+  const paths = resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/authority/dsh', homePath: '/home/tester' })
 
   assert.equal(
     paths.receipts,
-    '/workspace/lily_ai/logs/DeepSeek-Harness自进化/state/receipts.jsonl',
+    '/authority/dsh/.skill-evolution-authority/state/receipts.jsonl',
   )
   assert.equal(
     paths.evaluationRoot,
     '/workspace/lily_ai/tmp/DeepSeek-Harness自进化/evals',
   )
+  assert.equal(paths.strategy, '/authority/dsh/skills/optimize-work-strategy/references/strategies.yaml')
 })
 
 test('assertContainedPathNoSymlinks rejects a symlinked parent directory', async () => {
@@ -34,9 +36,12 @@ test('assertContainedPathNoSymlinks rejects a symlinked parent directory', async
 })
 
 test('resolveWorkbenchPaths rejects broad or ambiguous workspace roots', () => {
-  assert.throws(() => resolveWorkbenchPaths('/', { homePath: '/home/tester' }), /too broad/)
-  assert.throws(() => resolveWorkbenchPaths('/home/tester', { homePath: '/home/tester' }), /home directory/)
-  assert.throws(() => resolveWorkbenchPaths('relative/path', { homePath: '/home/tester' }), /absolute/)
+  assert.throws(() => resolveWorkbenchPaths('/', { authorityRoot: '/authority/dsh', homePath: '/home/tester' }), /too broad/)
+  assert.throws(() => resolveWorkbenchPaths('/home/tester', { authorityRoot: '/authority/dsh', homePath: '/home/tester' }), /home directory/)
+  assert.throws(() => resolveWorkbenchPaths('relative/path', { authorityRoot: '/authority/dsh', homePath: '/home/tester' }), /absolute/)
+  assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/workspace/lily_ai/authority', homePath: '/home/tester' }), /authorityRoot must be outside workspace/)
+  assert.throws(() => resolveWorkbenchPaths('/workspace/lily_ai', { authorityRoot: '/workspace', homePath: '/home/tester' }), /must not contain workspace/)
+  assert.throws(() => assertAuthorityRootOutsideSandboxTemp('/tmp/evolution-authority', { temporaryRoot: '/tmp', realpath: (value) => value }), /temporary directory/)
 })
 
 test('assertContainedRegularFile accepts a real file inside the root', async () => {

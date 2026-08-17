@@ -42,6 +42,15 @@ test('buildCandidate binds the proposal to a deterministic baseline hash and id'
   const candidate = buildCandidate({
     pattern,
     baselineCatalog,
+    evaluationBinding: {
+      schemaVersion: 1,
+      stableSkillHash: '1'.repeat(64),
+      stableStrategiesHash: '2'.repeat(64),
+      fixtureManifestHash: '3'.repeat(64),
+      evaluationPolicyHash: '4'.repeat(64),
+      evaluatorCodeHash: '5'.repeat(64),
+      fixtureIds: ['SUP-1', 'SUP-2', 'SUP-3', 'HOLD-1', 'HOLD-2'],
+    },
     date: new Date('2026-08-17T00:00:00Z'),
     sequence: 1,
   })
@@ -52,4 +61,6 @@ test('buildCandidate binds the proposal to a deterministic baseline hash and id'
   assert.equal(candidate.validationAttempts, 0)
   assert.deepEqual(candidate.caseIds, caseIds)
   assert.equal(candidate.state, 'awaiting-validation')
+  assert.equal(candidate.evaluationBinding.stableSkillHash, '1'.repeat(64))
+  assert.equal(candidate.evaluationBinding.baselineCatalogHash, candidate.baselineHash)
 })

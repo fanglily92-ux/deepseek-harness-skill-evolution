@@ -1,35 +1,69 @@
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createEvolutionTools } from './src/tools.js'
 import { createRuntimeServices } from './src/runtime.js'
 import { createEventObserver } from './src/event-observer.js'
 import { ReceiptLedger } from './src/receipt-ledger.js'
-import { resolveWorkbenchPaths } from './src/paths.js'
+import { assertAuthorityRootOutsideSandboxTemp, resolveWorkbenchPaths } from './src/paths.js'
 import { createHarnessEvaluator } from './src/harness-evaluator.js'
 import { defineEvolutionTool } from './src/tool-definition.js'
 
 export const name = 'deepseek-skill-evolution'
-export const inject = ['tools', 'agents', 'agentPresets']
+export const inject = ['tools', 'agents', 'agentPresets', 'shell', 'fs', 'sandboxPolicy']
+
+export function recordObserverSuccess(observerHealth, seq) {
+  if (observerHealth.status === 'degraded') return
+  observerHealth.status = 'healthy'
+  observerHealth.lastErrorCode = null
+  observerHealth.lastSuccessSeq = Number.isFinite(seq) ? seq : observerHealth.lastSuccessSeq
+}
+
+function containedBy(root, target) {
+  const relation = relative(resolve(root), resolve(target))
+  return relation === '' || (!relation.startsWith('..') && !isAbsolute(relation))
+}
 
 export function apply(ctx, config = {}) {
   if (!config.services && typeof config.workspace !== 'string') {
     throw new Error('deepseek-skill-evolution requires an absolute workspace path')
   }
   const pluginRoot = dirname(fileURLToPath(import.meta.url))
+  let authorityPaths
+  let sandboxPolicy
+  if (config.workspace) {
+    authorityPaths = resolveWorkbenchPaths(config.workspace, { authorityRoot: config.authorityRoot })
+    assertAuthorityRootOutsideSandboxTemp(authorityPaths.authorityRoot)
+    if (!containedBy(authorityPaths.authorityRoot, pluginRoot)) throw new Error('plugin code must be installed under authorityRoot outside the agent workspace')
+    sandboxPolicy = ctx.sandboxPolicy ?? ctx.get?.('sandboxPolicy')
+    if (!sandboxPolicy || typeof sandboxPolicy.resolve !== 'function') throw new Error('sandboxPolicy service is required')
+    for (const [name, mode] of [['shell', ctx.shell?.sandboxMode], ['fs', ctx.fs?.sandboxMode], ['policy', sandboxPolicy.defaultMode]]) {
+      if (!['read-only', 'workspace-write'].includes(mode)) throw new Error(`${name} must enforce read-only or workspace-write mode`)
+    }
+  }
   const observerHealth = { status: config.workspace ? 'initializing' : 'healthy', lastErrorCode: null, lastSuccessSeq: null }
   const evaluator = config.evaluator ?? (config.workspace ? createHarnessEvaluator({
     ctx,
     workspace: config.workspace,
+    authorityRoot: config.authorityRoot,
     fixturesDirectory: join(pluginRoot, 'eval', 'fixtures'),
     policyPath: join(pluginRoot, 'config', 'evaluation-policy.json'),
   }) : undefined)
-  const services = config.services ?? createRuntimeServices({ workspace: config.workspace, evaluator, observerHealth })
+  const services = config.services ?? createRuntimeServices({ workspace: config.workspace, authorityRoot: config.authorityRoot, evaluator, observerHealth })
   const disposers = []
   for (const tool of createEvolutionTools({ defineTool: defineEvolutionTool, services })) {
     disposers.push(ctx.tools.register(tool))
   }
-  disposers.push(ctx.on('tools/pre-execute', (exec, next) => {
+  disposers.push(ctx.on('tools/pre-execute', async (exec, next) => {
+    if (authorityPaths) {
+      const policy = await sandboxPolicy.resolve(exec.agent?.session ? { session: exec.agent.session } : {})
+      if (!['read-only', 'workspace-write'].includes(policy?.mode) || resolve(policy.workspaceRoot) !== authorityPaths.workspace) {
+        return { kind: 'deny', reason: 'Skill evolution requires a workspace-confined agent session.' }
+      }
+      if (exec.arguments?.sandbox_permissions !== undefined) {
+        return { kind: 'deny', reason: 'Sandbox escalation is disabled while the Skill evolution authority is mounted.' }
+      }
+    }
     if (config.workspace && !exec.name.startsWith('evolution_')) {
       const serialized = JSON.stringify(exec.arguments ?? {}).replaceAll('\\', '/')
       const protectedFragments = [
@@ -52,7 +86,7 @@ export function apply(ctx, config = {}) {
   if (typeof config.observer === 'function') {
     disposers.push(ctx.on('session/event', config.observer))
   } else if (config.workspace) {
-    const paths = resolveWorkbenchPaths(config.workspace)
+    const paths = authorityPaths
     let ledgerPromise
     let observerPromise
     const listener = async (session, event) => {
@@ -63,9 +97,7 @@ export function apply(ctx, config = {}) {
           readWhitelist(join(pluginRoot, 'config', 'whitelist.json')),
         ]).then(([ledger, whitelist]) => createEventObserver({ ledger, whitelist }))
         const result = await (await observerPromise)(session, event)
-        observerHealth.status = 'healthy'
-        observerHealth.lastErrorCode = null
-        observerHealth.lastSuccessSeq = Number.isFinite(event?.seq) ? event.seq : observerHealth.lastSuccessSeq
+        recordObserverSuccess(observerHealth, event?.seq)
         return result
       } catch (error) {
         observerHealth.status = 'degraded'

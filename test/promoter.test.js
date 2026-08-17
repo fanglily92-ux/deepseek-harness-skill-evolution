@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { hashCatalog, promoteCandidate } from '../src/promoter.js'
+import { hashCatalog, promoteCandidate, recoverPromotionJournal } from '../src/promoter.js'
 import { hashCandidateProposal } from '../src/integrity.js'
 
 function proposedRule() {
@@ -73,4 +73,30 @@ test('promoteCandidate rejects a proposal changed after validation', async () =>
   const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: { ...original, action: 'Changed after validation.' }, candidateHash: hashCandidateProposal(original) }
   await assert.rejects(promoteCandidate({ ...paths, candidate, validationReport }), /candidate content hash mismatch/)
   assert.deepEqual(JSON.parse(await readFile(paths.strategyPath, 'utf8')), paths.catalog)
+})
+
+test('promotion journal recovers catalog, versions, and candidate state after a simulated crash', async () => {
+  const paths = await setup()
+  await writeFile(paths.versionsPath, '')
+  const candidateStatePath = join(paths.root, 'candidates.json')
+  const journalPath = join(paths.root, 'promotion.journal.json')
+  const validationReport = { pass: true, candidateId: 'EVO-20260817-001', baselineHash: hashCatalog(paths.catalog), reportHash: 'c'.repeat(64), scorecard: { supportCandidate: 0, supportCount: 3 } }
+  const candidate = { id: validationReport.candidateId, state: 'awaiting-approval', baselineHash: validationReport.baselineHash, validationReportHash: validationReport.reportHash, proposedRule: proposedRule(), candidateHash: hashCandidateProposal(proposedRule()) }
+  await writeFile(candidateStatePath, `${JSON.stringify({ schemaVersion: 1, candidates: [candidate] }, null, 2)}\n`)
+
+  await assert.rejects(promoteCandidate({
+    ...paths, candidate, validationReport, candidateStatePath, journalPath,
+    faultAfter: 'version-appended', simulateCrash: true,
+  }), /simulated promotion crash/)
+
+  await recoverPromotionJournal({
+    journalPath,
+    expectedPaths: [paths.strategyPath, paths.versionsPath, candidateStatePath],
+    expectedLockPath: `${paths.strategyPath}.lock`,
+    force: true,
+  })
+  assert.deepEqual(JSON.parse(await readFile(paths.strategyPath, 'utf8')), paths.catalog)
+  assert.equal(await readFile(paths.versionsPath, 'utf8'), '')
+  assert.equal(JSON.parse(await readFile(candidateStatePath, 'utf8')).candidates[0].state, 'awaiting-approval')
+  await assert.rejects(readFile(journalPath), /ENOENT/)
 })

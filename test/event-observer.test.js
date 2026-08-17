@@ -125,4 +125,19 @@ test('createEventObserver surfaces ledger failures to plugin health', async () =
   await observe(session, { type: 'tool/result', seq: 2, time: 2, data: { message: { source: { callId: 'skill' }, content: [{ type: 'tool-result', isError: false }] } } })
   await assert.rejects(observe(session, { type: 'turn/end', seq: 3, time: 3, data: { turn: 1 } }), /disk/)
   assert.equal(observe.health.ok, false)
+  await observe({ id: 'unrelated-session' }, { type: 'turn/start', seq: 4, time: 4, data: { turn: 1 } })
+  assert.equal(observe.health.ok, false)
+})
+
+test('createEventObserver does not correlate reused call ids across sessions', async () => {
+  const appended = []
+  const observe = createEventObserver({ ledger: { append: async (value) => appended.push(value) }, whitelist: new Set(['optimize-work-strategy']) })
+  const first = { id: 'first-session' }
+  const second = { id: 'second-session' }
+  await observe(first, { type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } })
+  await observe(second, { type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } })
+  await observe(first, { type: 'tool/call', seq: 1, time: 1, data: { turn: 1, callId: 'reused', name: 'skill', arguments: '{"name":"optimize-work-strategy"}' } })
+  await observe(second, { type: 'tool/result', seq: 1, time: 1, data: { turn: 1, message: { source: { callId: 'reused' }, content: [{ type: 'tool-result', isError: false }] } } })
+  await observe(second, { type: 'turn/end', seq: 2, time: 2, data: { turn: 1 } })
+  assert.deepEqual(appended, [])
 })

@@ -1,6 +1,6 @@
 # DeepSeek Harness Skill Evolution
 
-一个本地、可审计、人工批准后才生效的 DeepSeek Harness Skill 自进化实验原型。当前版本：`0.1.0`。尚未通过真实 Harness 挂载与调用验证，不应安装到生产工作台。
+一个本地、可审计、人工批准后才生效的 DeepSeek Harness Skill 自进化插件。当前版本：`0.1.0`。代码仍处于发布门审查阶段；尚未写入真实 `~/.dsh`、挂载、重启或进行真实工具调用，因此不宣称已安装。
 
 它不让模型直接改正式 Skill。它把真实反馈压缩成隐私最小化收据，从重复失败中形成窄范围策略候选，用 stable/candidate 成对回归证明候选在已知边界内更好，最后只在用户明确批准精确 `EVO-*` 编号后原子追加到稳定策略。
 
@@ -34,22 +34,22 @@ Feedback → Reflection → Experience → Update
 软件无法对所有未知未来任务作数学上的绝对保证。本项目提供的是失败关闭的单调改进合同：
 
 1. 至少三个独立 session 的失败收据支持同一机制，才允许提案。
-2. stable/candidate 使用相同 provider、model、输入、工具权限和预算；评估子会话禁止执行工具，并使用不同临时根；每个 fixture 随机决定 arm 顺序。
+2. stable/candidate 使用相同 provider、model、输入、工具权限和预算；评估子会话禁止执行工具，并使用不同临时根；每个 fixture 随机决定 arm 顺序，比较器只看 A/B 客观分数，结果后才解封来源。
 3. 至少三个 support fixture、两个候选创建前存在的 held-out fixture，以及全部 golden fixture 必须运行。
 4. 安全、隐私、人工门和关键质量必须零回归，预先声明的主要错误指标必须严格改善。
 5. LLM 执行不是确定性的：每个 golden-label fixture 预提交标签并运行三次；总预算固定为 30 arm-runs。一次验证调用后候选即终结，不能反复抽样直到偶然通过。
 6. 缺数据、并列、比较器分歧、额度不足、超时、异常或不可判定结果全部失败关闭，不修改稳定版。
-7. 晋升前再次校验收据链、候选内容哈希、fixture manifest、evaluator 版本、基线哈希、验证报告哈希、lock、备份与写后条件，并由 Harness `tools/pre-execute` 发起最终一次性批准。
+7. 候选创建前绑定 stable Skill、stable catalog、fixture manifest、evaluation policy 和 evaluator 代码哈希；晋升前重算完整报告并复验绑定。晋升使用持久 journal 同时保护 catalog、version ledger 和 candidate state，崩溃后失败关闭并回滚。
 
-V1 的实时评估只处理有预提交客观标签的 fixture；标签打分是确定性的，但模型执行本身不是。匿名 A/B 比较器只有独立单元测试，尚未接入真实主观模型评审；任何需要主观判断的候选在 V1 不具备晋升证据。后续接入匿名 A/B 仍需独立复核，不能用模型自评替代。
+V1 的实时评估只处理有预提交客观标签的 fixture；标签打分是确定性的，但模型执行本身不是。sealed A/B 比较已接入主路径，只依据关键护栏和预提交标签误差决定 winner；任何需要主观判断的候选在 V1 不具备晋升证据。
 
 这些门只保证正式工具路径失败关闭，不声称测试集覆盖未来所有情况，也不构成对抗同一 OS 用户任意 shell 的安全边界。真实运行后的自动监控/回滚模块尚未接入主状态机。
 
-## 威胁模型与当前阻断
+## 威胁模型与 authority 边界
 
-当前权威状态仍位于 agent 可见的 workspace。插件对 symlink、跨进程 append、CAS、哈希绑定和正式工具流程做了加固，但无法阻止同一用户权限下的任意 shell 直接改写 workspace，再同时伪造相关状态。要把“不能绕过晋升”做成真正安全边界，必须把权威 catalog、候选、fixture manifest 和 ledger anchor 放进经验证的 host-owned、agent 工具不可写区域，并验证 Harness sandbox 对 shell 同样生效。
+权威 plugin code、stable Skill、fixture、catalog、candidate/report、receipt ledger 和 head/count anchor 都位于 workspace 之外的 `$DSH_HOME`。插件只在 `shell`、`fs` 和当前 session policy 都是 `read-only` 或 `workspace-write` 时挂载，禁止运行中 sandbox escalation，并拒绝把 authority 放在 Harness 允许写入的系统临时目录。`npm run verify:authority` 使用本机 rc.6 官方 `dsh-sandbox-local` 真实进程验证 workspace 可写且 authority sibling 不可写。
 
-因此 `0.1.0` 的结论是：代码实验原型与本地测试可审查；安装、公开发布、真实晋升均被此架构门阻断。人工批准仍是必要条件，但不能弥补缺失的 OS/进程隔离。
+此边界防御通过 Harness agent 工具的绕过，不宣称防御已获得同一 OS 账户和独立本机终端权限的恶意进程。所有权威路径在打开前逐级拒绝 symlink；跨进程 lock、anchor 和 journal 对并发与崩溃失败关闭。
 
 ## 组件
 
@@ -59,6 +59,7 @@ V1 的实时评估只处理有预提交客观标签的 fixture；标签打分是
 - 支持/held-out fixtures：`eval/fixtures/`
 - 只读环境检查：`scripts/doctor.js`
 - 默认零写入的 preset 安装预演：`scripts/install-harness.js`
+- 真实 rc.6 sandbox 边界探针：`scripts/verify-harness-boundary.js`
 
 ## 兼容性
 
@@ -74,6 +75,7 @@ V1 拒绝在其他 Harness 版本上安装，不做猜测性兼容。
 ```bash
 npm ci
 npm run release:check
+npm run verify:authority
 npm pack --dry-run
 ```
 
@@ -85,8 +87,8 @@ npm pack --dry-run
 
 安装会涉及两类写入：
 
-1. 人工把仓库内 `skills/optimize-work-strategy/` 放入目标 workspace 的 `.dsh/skills/`。当前安装脚本不执行这一步；如果目标已存在，必须先独立 diff，禁止覆盖。
-2. 安装脚本只负责向用户 preset 的 `agent.cordis.yml` 追加一个插件 row。它先生成 SHA-256 预演；真正写入需要显式 `--apply` 和完全匹配的预演哈希，并创建内容寻址备份。
+1. 将已审查的 plugin manifest 复制到 `$DSH_HOME/plugins/deepseek-skill-evolution/<version>/`，并将 stable Skill 复制到 `$DSH_HOME/skills/optimize-work-strategy/`。目标存在或 project `.dsh/skills/optimize-work-strategy` 会 shadow 时必须失败，禁止覆盖。
+2. 向用户 preset 的 `agent.cordis.yml` 追加指向受保护 plugin 的 row，配置 `workspace` 与 `authorityRoot`。真正写入同时需要完全匹配的 preset 哈希和 source-manifest 哈希，并创建内容寻址备份；任一步失败都删除本次新建的目标。
 
 插件不会修改 shipped preset、provider、model、权限、凭据、全局 npm 包或 Harness 官方源码。对任何真实 `$DSH_HOME` 写入，必须先向用户展示目标、diff、哈希和恢复点并取得明确批准。
 
@@ -107,7 +109,8 @@ node scripts/install-harness.js --workspace "$EVOLUTION_WORKSPACE"
 node scripts/install-harness.js \
   --workspace "$EVOLUTION_WORKSPACE" \
   --apply \
-  --expected-preset-hash "<approved-sha256>"
+  --expected-preset-hash "<approved-sha256>" \
+  --expected-source-manifest-hash "<approved-sha256>"
 ```
 
 不要在未经授权的机器上执行第二条命令。
@@ -122,21 +125,23 @@ Doctor 只读检查平台、Node、`dsh`、Harness 版本、插件入口、prese
 
 ## 数据与状态
 
-实验原型的运行状态只保存在 workspace 内：
+权威运行状态保存在 `$DSH_HOME` 内，workspace 只有可删除的隔离评估目录和可重建 Obsidian 投影：
 
 ```text
-logs/DeepSeek-Harness自进化/state/
-tmp/DeepSeek-Harness自进化/evals/
-.dsh/skills/optimize-work-strategy/references/strategies.yaml
+$DSH_HOME/.skill-evolution-authority/state/
+$DSH_HOME/skills/optimize-work-strategy/
+$DSH_HOME/plugins/deepseek-skill-evolution/<version>/eval/fixtures/
+<workspace>/tmp/DeepSeek-Harness自进化/evals/          # 可删除
+<workspace>/知识库/DeepSeek Harness自进化工作台/ # 可重建投影
 ```
 
 候选不会写入任何 Skill discovery root。持久收据只包含哈希化 session 坐标、结果类别、错误机制、计数、时长和事件序号，不包含原始输入输出。
 
-这一布局便于审计，但不是对抗性权限边界；它正是当前禁止安装的原因。生产设计需要独立的 host-owned authority root 和外部 ledger head/count anchor。
+收据持久层仅保存哈希化 session 坐标、结果类别、错误机制、计数、时长和事件序号，不保存原始输入输出。head/count anchor 位于 authority state，可检出整链截断或重写。
 
 ## 当前发布门
 
-仓库可以独立审查和运行本地测试，但当前独立复核结论为“不适合 merge/install”。维护者不会由此仓库自动创建 GitHub remote、push、安装到真实 `$DSH_HOME` 或宣称真实 Harness 调用已验证。安全边界修复、二次独立复核、公开发布、安装、重启挂载和真实调用是六个独立门。
+仓库可以独立审查和运行本地测试，但仍在等待第二次独立复核。维护者不会由此仓库自动创建 GitHub remote、push、安装到真实 `$DSH_HOME` 或宣称真实 Harness 调用已验证。代码完成、测试通过、独立复核、公开发布、用户批准安装、重启挂载和真实调用是独立门。
 
 ## 第三方说明
 

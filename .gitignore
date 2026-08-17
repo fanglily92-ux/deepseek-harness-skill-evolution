@@ -1,4 +1,5 @@
 node_modules/
+.dsh-evolution-boundary-*/
 coverage/
 .DS_Store
 *.log

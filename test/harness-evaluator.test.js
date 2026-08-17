@@ -12,12 +12,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 test('Harness evaluator runs paired fixtures with identical environment and returns a validator report', async () => {
   const calls = []
   const workspace = await mkdtemp(join(tmpdir(), 'evolution-harness-evaluator-'))
-  const skillDirectory = join(workspace, '.dsh', 'skills', 'optimize-work-strategy')
+  const authorityRoot = await mkdtemp(join(tmpdir(), 'evolution-harness-authority-'))
+  const skillDirectory = join(authorityRoot, 'skills', 'optimize-work-strategy')
   await mkdir(join(skillDirectory, 'references'), { recursive: true })
   await writeFile(join(skillDirectory, 'SKILL.md'), 'STABLE_SKILL_MARKER\n')
   await writeFile(join(skillDirectory, 'references', 'strategies.yaml'), '{"schemaVersion":1,"stableVersion":0,"rules":[]}\n')
   const evaluator = createHarnessEvaluator({
-    ctx: {}, workspace,
+    ctx: {}, workspace, authorityRoot,
     fixturesDirectory: join(root, 'eval', 'fixtures'),
     policyPath: join(root, 'config', 'evaluation-policy.json'),
     runArm: async (call) => {
@@ -26,18 +27,27 @@ test('Harness evaluator runs paired fixtures with identical environment and retu
       return { criticalPass: true, primary: call.arm === 'candidate' && isSupport ? 0 : isSupport ? 1 : 0 }
     },
   })
-  const report = await evaluator({
+  const prepared = await evaluator.prepareCandidateBinding()
+  const candidate = {
     id: 'EVO-20260818-001', createdAt: 1786924800000,
     candidateHash: 'a'.repeat(64), baselineHash: 'b'.repeat(64),
     proposedRule: { appliesWhen: { failureMechanisms: ['UNCLEAR_APPROVAL'] } },
-  }, { agent: { options: { provider: 'same-provider', model: 'same-model' } } })
+    evaluationBinding: { ...prepared, baselineCatalogHash: 'b'.repeat(64), candidateHash: 'a'.repeat(64) },
+  }
+  const report = await evaluator(candidate, { agent: { options: { provider: 'same-provider', model: 'same-model' } } })
 
   assert.equal(report.status, 'complete')
   assert.equal(report.fixtureResults.length, 15)
   assert.equal(report.allGoldenIncluded, true)
+  assert.deepEqual(report.comparator, { disagreement: false, mode: 'sealed-blind-golden-label' })
+  assert.equal(report.fixtureResults.every((result) => result.blindComparison?.sealedMappingHash?.length === 64), true)
   assert.equal(calls.length, 30)
+  assert.deepEqual(report.binding, candidate.evaluationBinding)
   assert.equal(calls.every((call) => call.candidate.stableSkill === 'STABLE_SKILL_MARKER\n'), true)
   assert.deepEqual(new Set(calls.map((call) => JSON.stringify(call.environment))), new Set(['{"provider":"same-provider","model":"same-model"}']))
+
+  await writeFile(join(skillDirectory, 'SKILL.md'), 'CHANGED_AFTER_PROPOSAL\n')
+  await assert.rejects(evaluator(candidate, { agent: { options: { provider: 'same-provider', model: 'same-model' } } }), /evaluation binding changed/)
 })
 
 test('child-agent arm runner inherits the parent model, blocks tools, and returns only scored facts', async () => {
@@ -80,6 +90,7 @@ test('child-agent arm runner inherits the parent model, blocks tools, and return
   })
   assert.deepEqual(creationOptions.agentOptions, parent.options)
   assert.match(contextText, /STR-0001/)
+  assert.doesNotMatch(contextText, /Additional candidate rule|NONE/)
   assert.equal(guard({}), 'evaluation agents cannot execute tools')
   assert.deepEqual(result, { criticalPass: true, primary: 0 })
 })

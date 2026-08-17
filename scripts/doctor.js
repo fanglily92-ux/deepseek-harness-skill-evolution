@@ -2,6 +2,7 @@
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readFile } from 'node:fs/promises'
 
 import { runDoctor } from '../src/doctor.js'
 
@@ -23,10 +24,12 @@ async function main() {
   if (!args.workspace) throw new Error('--workspace is required')
   const scriptRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
   const dshHome = resolve(args['dsh-home'] ?? join(homedir(), '.dsh'))
+  const packageJson = JSON.parse(await readFile(join(scriptRoot, 'package.json'), 'utf8'))
   const result = await runDoctor({
     workspace: resolve(args.workspace),
     dshHome,
-    pluginEntry: resolve(args['plugin-entry'] ?? join(scriptRoot, 'index.js')),
+    authorityRoot: dshHome,
+    pluginEntry: resolve(args['plugin-entry'] ?? join(dshHome, 'plugins', 'deepseek-skill-evolution', packageJson.version, 'index.js')),
     presetPath: join(dshHome, '.agent-presets', 'video-reader', 'agent.cordis.yml'),
   })
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)

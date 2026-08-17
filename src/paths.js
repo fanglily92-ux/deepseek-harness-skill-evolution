@@ -1,5 +1,6 @@
 import { lstat } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { realpathSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 function assertContained(root, target) {
@@ -9,7 +10,18 @@ function assertContained(root, target) {
   }
 }
 
-export function resolveWorkbenchPaths(workspace, { homePath = homedir() } = {}) {
+export function assertAuthorityRootOutsideSandboxTemp(authorityRoot, { temporaryRoot = tmpdir(), realpath = realpathSync } = {}) {
+  const authority = realpath(resolve(authorityRoot))
+  const temporary = realpath(resolve(temporaryRoot))
+  if (authority !== resolve(authorityRoot)) throw new Error('authorityRoot must not be a symlink or aliased path')
+  const relation = relative(temporary, authority)
+  if (relation === '' || (!relation.startsWith('..') && !isAbsolute(relation))) {
+    throw new Error('authorityRoot may not be inside the sandbox-writable temporary directory')
+  }
+  return authority
+}
+
+export function resolveWorkbenchPaths(workspace, { authorityRoot, homePath = homedir() } = {}) {
   if (typeof workspace !== 'string' || !isAbsolute(workspace)) {
     throw new Error('workspace must be an absolute path')
   }
@@ -21,18 +33,35 @@ export function resolveWorkbenchPaths(workspace, { homePath = homedir() } = {}) 
   if (root === resolve(homePath)) {
     throw new Error('workspace may not be the home directory')
   }
+  if (typeof authorityRoot !== 'string' || !isAbsolute(authorityRoot)) throw new Error('authorityRoot must be an absolute path')
+  const authority = resolve(authorityRoot)
+  if (authority === resolve('/') || authority === resolve(homePath)) throw new Error('authorityRoot is too broad')
+  const authorityFromWorkspace = relative(root, authority)
+  if (authorityFromWorkspace === '' || (!authorityFromWorkspace.startsWith('..') && !isAbsolute(authorityFromWorkspace))) {
+    throw new Error('authorityRoot must be outside workspace')
+  }
+  const workspaceFromAuthority = relative(authority, root)
+  if (workspaceFromAuthority === '' || (!workspaceFromAuthority.startsWith('..') && !isAbsolute(workspaceFromAuthority))) {
+    throw new Error('authorityRoot must not contain workspace')
+  }
 
+  const stateRoot = join(authority, '.skill-evolution-authority', 'state')
   const paths = {
     workspace: root,
-    receipts: join(root, 'logs', 'DeepSeek-Harness自进化', 'state', 'receipts.jsonl'),
-    candidates: join(root, 'logs', 'DeepSeek-Harness自进化', 'state', 'candidates.json'),
-    versions: join(root, 'logs', 'DeepSeek-Harness自进化', 'state', 'versions.jsonl'),
+    authorityRoot: authority,
+    receipts: join(stateRoot, 'receipts.jsonl'),
+    receiptAnchor: join(stateRoot, 'receipts.anchor.json'),
+    candidates: join(stateRoot, 'candidates.json'),
+    versions: join(stateRoot, 'versions.jsonl'),
+    promotionJournal: join(stateRoot, 'promotion.journal.json'),
+    backups: join(stateRoot, 'backups'),
+    strategy: join(authority, 'skills', 'optimize-work-strategy', 'references', 'strategies.yaml'),
+    stableSkill: join(authority, 'skills', 'optimize-work-strategy', 'SKILL.md'),
     evaluationRoot: join(root, 'tmp', 'DeepSeek-Harness自进化', 'evals'),
   }
 
-  for (const value of Object.values(paths)) {
-    assertContained(root, value)
-  }
+  for (const value of [paths.receipts, paths.receiptAnchor, paths.candidates, paths.versions, paths.promotionJournal, paths.backups, paths.strategy, paths.stableSkill]) assertContained(authority, value)
+  assertContained(root, paths.evaluationRoot)
   return Object.freeze(paths)
 }
 

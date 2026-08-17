@@ -1,8 +1,9 @@
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { installerContract } from './installer.js'
+import { assertContainedPathNoSymlinks } from './paths.js'
 
 async function regularFile(path) {
   try {
@@ -12,6 +13,14 @@ async function regularFile(path) {
     if (error.code === 'ENOENT') return false
     throw error
   }
+}
+
+async function pathMissing(path) {
+  try { await lstat(path); return false } catch (error) { if (error.code === 'ENOENT') return true; throw error }
+}
+
+async function containedRealPath(root, target) {
+  try { await assertContainedPathNoSymlinks(root, target); return true } catch { return false }
 }
 
 async function readText(path) {
@@ -48,10 +57,12 @@ async function hasNoLockFiles(paths) {
 
 export async function runDoctor(options) {
   const workspace = resolve(options.workspace)
+  const authorityRoot = resolve(options.authorityRoot ?? options.dshHome)
   const pluginEntry = resolve(options.pluginEntry)
   const presetPath = resolve(options.presetPath)
-  const stateRoot = join(workspace, 'logs', 'DeepSeek-Harness自进化', 'state')
-  const skillPath = join(workspace, '.dsh', 'skills', 'optimize-work-strategy', 'SKILL.md')
+  const stateRoot = join(authorityRoot, '.skill-evolution-authority', 'state')
+  const skillPath = join(authorityRoot, 'skills', 'optimize-work-strategy', 'SKILL.md')
+  const projectSkillPath = join(workspace, '.dsh', 'skills', 'optimize-work-strategy')
   const pluginRoot = dirname(pluginEntry)
   const whitelistPath = join(pluginRoot, 'config', 'whitelist.json')
   const dashboardPath = join(workspace, '知识库', 'DeepSeek Harness自进化工作台', '工作台首页.md')
@@ -69,8 +80,12 @@ export async function runDoctor(options) {
     preset
       && new RegExp(`^\\s*-\\s+id:\\s*${installerContract.pluginId}\\s*$`, 'm').test(preset)
       && preset.includes(JSON.stringify(pluginEntry))
-      && preset.includes(JSON.stringify(workspace)),
+      && preset.includes(JSON.stringify(workspace))
+      && preset.includes(JSON.stringify(authorityRoot)),
   )
+
+  const pluginRelation = relative(authorityRoot, pluginEntry)
+  const authorityOk = pluginRelation !== '' && !pluginRelation.startsWith('..') && !isAbsolute(pluginRelation) && await containedRealPath(authorityRoot, pluginEntry)
 
   const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10)
   const checks = [
@@ -78,14 +93,17 @@ export async function runDoctor(options) {
     check('node', nodeMajor >= installerContract.minimumNodeMajor, process.versions.node),
     check('dsh', Boolean(dshVersion), dshVersion ?? 'dsh command unavailable'),
     check('harness-version', dshVersion === installerContract.supportedHarnessVersion, dshVersion ?? 'unknown'),
+    check('authority-root', authorityOk, authorityRoot),
     check('plugin-entry', await regularFile(pluginEntry), pluginEntry),
     check('preset', presetOk, presetPath),
     check('skill', await regularFile(skillPath), skillPath),
+    check('project-skill-shadow', await pathMissing(projectSkillPath), projectSkillPath),
     check('whitelist', whitelistOk, whitelistPath),
     check('ledger', await regularFile(join(stateRoot, 'receipts.jsonl')), join(stateRoot, 'receipts.jsonl')),
+    check('ledger-anchor', await regularFile(join(stateRoot, 'receipts.anchor.json')), join(stateRoot, 'receipts.anchor.json')),
     check('candidate-state', await regularFile(join(stateRoot, 'candidates.json')), join(stateRoot, 'candidates.json')),
     check('versions', await regularFile(join(stateRoot, 'versions.jsonl')), join(stateRoot, 'versions.jsonl')),
-    check('locks', await hasNoLockFiles([stateRoot, join(workspace, '.dsh', 'skills', 'optimize-work-strategy', 'references')]), 'no stale lock files'),
+    check('locks', await hasNoLockFiles([stateRoot, join(authorityRoot, 'skills', 'optimize-work-strategy', 'references')]), 'no stale lock files'),
     check('dashboard', await regularFile(dashboardPath), dashboardPath),
   ]
   return { ok: checks.every((item) => item.ok), checks }

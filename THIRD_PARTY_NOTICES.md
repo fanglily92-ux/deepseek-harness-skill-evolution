@@ -18,5 +18,6 @@ The isolation rule was also informed by [Anthropic Skills issue #1260](https://g
 
 - `@deepseek-ai/dsh-tools@0.1.0-rc.6` — MIT; its public tool shape was inspected during compatibility work, but it is not imported or shipped.
 - `@deepseek-ai/dsh-agent-presets@0.1.0-rc.6` — MIT; its public preset contract was inspected during compatibility work, but it is not imported or shipped.
+- `@deepseek-ai/dsh-sandbox-local@0.1.0-rc.6` — MIT; the optional host verification script dynamically loads the copy already installed with Harness to execute a real confinement probe. It is not downloaded, bundled, or declared as a project dependency.
 
 The runtime dependency set is empty. `package-lock.json` and the runtime import graph are still checked at the release gate. This notice is not legal advice; the upstream license files remain authoritative.
