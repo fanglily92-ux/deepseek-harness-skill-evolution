@@ -83,6 +83,20 @@ test('plugin asks for one-time approval only for the exact promotion call', asyn
   assert.deepEqual(await gate({ name: 'evolution_status', arguments: {} }, next), { kind: 'allow' })
 })
 
+test('plugin asks before the high-token validation call', async () => {
+  const ctx = fakeContext()
+  apply(ctx, { services })
+  const gate = ctx.listeners.get('tools/pre-execute')
+
+  assert.deepEqual(
+    await gate({ name: 'evolution_validate', arguments: { candidate_id: 'EVO-20260817-001' } }, () => ({ kind: 'allow' })),
+    {
+      kind: 'ask',
+      reason: 'Validate EVO-20260817-001 with a 10-arm preflight and up to 20 confirmation arms (30 maximum; stop after reported metered usage reaches 100000 tokens). This is a high-token operation and requires explicit user approval.',
+    },
+  )
+})
+
 test('plugin denies obvious non-evolution writes to authority files as defense in depth', async () => {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'evolution-plugin-workspace-')))
   const ctx = fakeContext(workspace)

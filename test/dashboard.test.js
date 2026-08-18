@@ -75,7 +75,12 @@ test('createApprovalCard exposes the evidence needed for exact human approval wi
     proposedRule: { id: 'STR-0001', action: 'Require exact approval.', avoid: 'Generic approval.', primaryMetric: 'golden-label-error-rate', baselineValue: 1, candidateValue: 0 },
     evaluationReport: {
       allGoldenIncluded: true, comparator: { disagreement: false, mode: 'sealed-blind-golden-label' },
-      budget: { maxRuns: 30, timeoutMs: 120000, exhausted: false },
+      stage: 'full-validation',
+      budget: {
+        maxRuns: 30, actualRuns: 30, maxMeteredTokens: 100000, maxOutputTokensPerArm: 32,
+        maxPromptCharsPerArm: 8000, timeoutMs: 120000, exhausted: false,
+        usage: { inputTokens: 42000, outputTokens: 300, cacheReadTokens: 12000, meteredTokens: 42300 },
+      },
       fixtureResults: [
         { partition: 'support', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 1, candidatePrimary: 0 },
         { partition: 'heldout', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 0, candidatePrimary: 0 },
@@ -88,6 +93,13 @@ test('createApprovalCard exposes the evidence needed for exact human approval wi
   assert.deepEqual(card.evaluation.support, { count: 1, stableErrors: 1, candidateErrors: 0 })
   assert.equal(card.guardrails.zeroHeldoutRegression, true)
   assert.equal(card.cost.armRuns, 4)
+  assert.equal(card.cost.validationStage, 'full-validation')
+  assert.equal(card.cost.actualArmRuns, 30)
+  assert.equal(card.cost.inputTokens, 42000)
+  assert.equal(card.cost.outputTokens, 300)
+  assert.equal(card.cost.meteredTokens, 42300)
+  assert.equal(card.cost.maxMeteredTokens, 100000)
+  assert.equal(card.cost.maxOutputTokensPerArm, 32)
   assert.equal(JSON.stringify(card).includes('rawOutput'), false)
 })
 

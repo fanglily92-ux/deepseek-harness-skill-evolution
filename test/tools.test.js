@@ -26,6 +26,9 @@ test('createEvolutionTools exposes exactly five schemas and no model approval by
   const propose = tools.find((tool) => tool.name === 'evolution_propose')
   assert.equal('primary_metric' in propose.parameters.properties, false)
   assert.equal('baseline_value' in propose.parameters.properties, false)
+  const validate = tools.find((tool) => tool.name === 'evolution_validate')
+  assert.match(validate.description, /high-token operation/i)
+  assert.match(validate.description, /explicit user approval/i)
 })
 
 test('only evolution_status declares itself concurrency safe', () => {

@@ -31,12 +31,55 @@ export function buildEvaluationSuite({ candidate, fixtureRegistry, policy }) {
   return Object.freeze({ candidateId: candidate.id, support: structuredClone(support), heldout: structuredClone(heldout), policy: structuredClone(policy) })
 }
 
+function validEvaluationBudget(budget) {
+  return budget
+    && Number.isInteger(budget.maxRuns) && budget.maxRuns > 0
+    && Number.isInteger(budget.maxToolCalls) && budget.maxToolCalls >= 0
+    && Number.isInteger(budget.maxOutputTokensPerArm) && budget.maxOutputTokensPerArm > 0
+    && Number.isInteger(budget.maxPromptCharsPerArm) && budget.maxPromptCharsPerArm > 0
+    && Number.isInteger(budget.maxMeteredTokens) && budget.maxMeteredTokens > 0
+    && Number.isFinite(budget.timeoutMs) && budget.timeoutMs > 0
+}
+
+function normalizedUsage(result) {
+  const usage = result?.usage
+  if (!usage || ['inputTokens', 'outputTokens', 'cacheReadTokens'].some((name) => !Number.isFinite(usage[name]) || usage[name] < 0)) {
+    const error = new Error('arm did not report normalized token usage')
+    error.code = 'TOKEN_USAGE_UNAVAILABLE'
+    throw error
+  }
+  return usage
+}
+
 export async function runPairedEvaluation({ suite, environment, budget, runArm, firstArm = () => Math.random() < 0.5 ? 'stable' : 'candidate' }) {
   if (typeof runArm !== 'function') throw new Error('runArm is required')
+  const emptyUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, meteredTokens: 0 }
+  if (!validEvaluationBudget(budget)) {
+    return { status: 'inconclusive', reason: 'invalid evaluation budget', budget: { ...budget, actualRuns: 0, usage: emptyUsage, exhausted: false }, fixtureResults: [] }
+  }
   const fixtures = [...suite.support, ...suite.heldout]
   const plannedRuns = fixtures.reduce((total, fixture) => total + (fixture.deterministic ? 2 : suite.policy.stochasticTrials * 2), 0)
-  if (plannedRuns > budget.maxRuns) return { status: 'inconclusive', reason: 'budget exhausted', budget: { ...budget, exhausted: true }, fixtureResults: [] }
+  if (plannedRuns > budget.maxRuns) {
+    return { status: 'inconclusive', reason: 'budget exhausted', budget: { ...budget, actualRuns: 0, usage: emptyUsage, exhausted: true }, fixtureResults: [] }
+  }
   const fixtureResults = []
+  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, meteredTokens: 0 }
+  let actualRuns = 0
+  const executeArm = async (options) => {
+    const result = await runArm(options)
+    actualRuns += 1
+    const armUsage = normalizedUsage(result)
+    for (const name of ['inputTokens', 'outputTokens', 'cacheReadTokens']) {
+      usage[name] += armUsage[name]
+    }
+    usage.meteredTokens = usage.inputTokens + usage.outputTokens
+    if (armUsage.outputTokens > budget.maxOutputTokensPerArm || usage.meteredTokens >= budget.maxMeteredTokens) {
+      const error = new Error('token budget exhausted')
+      error.code = 'TOKEN_BUDGET'
+      throw error
+    }
+    return result
+  }
   try {
     for (const fixture of fixtures) {
       const trials = fixture.deterministic ? 1 : suite.policy.stochasticTrials
@@ -46,15 +89,21 @@ export async function runPairedEvaluation({ suite, environment, budget, runArm, 
         if (!['stable', 'candidate'].includes(first)) throw new Error('firstArm must return stable or candidate')
         const second = first === 'stable' ? 'candidate' : 'stable'
         const results = {}
-        results[first] = await runArm({ ...common, arm: first })
-        results[second] = await runArm({ ...common, arm: second })
+        results[first] = await executeArm({ ...common, arm: first })
+        results[second] = await executeArm({ ...common, arm: second })
         const { stable, candidate } = results
         fixtureResults.push({ fixtureId: fixture.id, partition: fixture.partition, golden: fixture.golden, trial, stable, candidate })
       }
     }
   } catch (error) {
     const code = typeof error?.code === 'string' && /^[A-Z0-9_-]{1,32}$/.test(error.code) ? error.code : 'UNKNOWN'
-    return { status: 'inconclusive', reason: `external evaluation failure: ${code}`, budget: { ...budget, exhausted: false }, fixtureResults: [] }
+    const tokenBudgetExhausted = code === 'TOKEN_BUDGET'
+    return {
+      status: 'inconclusive',
+      reason: tokenBudgetExhausted ? 'token budget exhausted' : `external evaluation failure: ${code}`,
+      budget: { ...budget, actualRuns, usage, exhausted: tokenBudgetExhausted },
+      fixtureResults: [],
+    }
   }
-  return { status: 'complete', budget: { ...budget, exhausted: false }, fixtureResults }
+  return { status: 'complete', budget: { ...budget, actualRuns, usage, exhausted: false }, fixtureResults }
 }

@@ -1,6 +1,6 @@
 # DeepSeek Harness Skill Evolution
 
-一个本地、可审计、人工批准后才生效的 DeepSeek Harness Skill 自进化插件。当前版本：`0.1.0`。代码仍处于发布门审查阶段；尚未写入真实 `~/.dsh`、挂载、重启或进行真实工具调用，因此不宣称已安装。
+一个本地、可审计、人工批准后才生效的 DeepSeek Harness Skill 自进化插件。当前源码版本：`0.2.0`。`0.1.0` 已公开发布并完成正式 Harness 状态调用；`0.2.0` 已安装到真实 `~/.dsh`，`video-reader` preset 已切换到新入口，重启后的 Harness Web HTTP 200，安装副本的五工具与 `evolution_validate` 原生 ask hook 已做零模型调用验证。`0.2.0` 尚未推送 GitHub，也未用真实候选触发 paired evaluation 或 live Harness ask。
 
 它不让模型直接改正式 Skill。它把真实反馈压缩成隐私最小化收据，从重复失败中形成窄范围策略候选，用 stable/candidate 成对回归证明候选在已知边界内更好，最后只在用户明确批准精确 `EVO-*` 编号后原子追加到稳定策略。
 
@@ -37,7 +37,7 @@ Feedback → Reflection → Experience → Update
 2. stable/candidate 使用相同 provider、model、输入、工具权限和预算；评估子会话禁止执行工具，并使用不同临时根；每个 fixture 随机决定 arm 顺序，比较器只看 A/B 客观分数，结果后才解封来源。
 3. 至少三个 support fixture、两个候选创建前存在的 held-out fixture，以及全部 golden fixture 必须运行。
 4. 安全、隐私、人工门和关键质量必须零回归；V1 按失败机制固定主要指标，`UNCLEAR_APPROVAL` 只能使用 `golden-label-error-rate`，调用者不能自报指标或 baseline。实际 stable/candidate 值由成对评估写回并绑定到验证报告。
-5. LLM 执行不是确定性的：每个 golden-label fixture 预提交标签并运行三次；总预算固定为 30 arm-runs。一次验证调用后候选即终结，不能反复抽样直到偶然通过。
+5. LLM 执行不是确定性的：先运行一次 10-arm preflight；只有严格改善才补 20 个 confirmation arm-runs，完整验证仍为每个 fixture 三次、最多 30 arm-runs。一次验证调用后候选即终结，不能反复抽样直到偶然通过。
 6. 缺数据、并列、比较器分歧、额度不足、超时、异常或不可判定结果全部失败关闭，不修改稳定版。
 7. 候选创建前绑定 stable Skill、stable catalog、fixture manifest、evaluation policy 和 evaluator 代码哈希；晋升前重算完整报告并复验绑定。晋升使用持久 journal 同时保护 catalog、version ledger 和 candidate state，崩溃后失败关闭并回滚。
 
@@ -70,6 +70,18 @@ V1 的实时评估只处理有预提交客观标签的 fixture；标签打分是
 插件运行时无 npm 依赖；工具定义使用本仓库的严格 JSON Schema 适配层，避免把 `0.1.0-rc.6` 插件与 npm 自动解析出的 `rc.7` peer 树混用。
 
 V1 拒绝在其他 Harness 版本上安装，不做猜测性兼容。
+
+## Token 与费用门
+
+`evolution_validate` 是高 Token 操作，必须经过 Harness 原生 `tools/pre-execute` 人工询问；用户未明确批准时不会开始任何评估子会话。询问会展示精确候选、10-arm preflight、最多 20 个 confirmation arms、30 次总上限和 `100000` metered-token 停止阈值。
+
+- 每个 arm 的输出上限：`32 tokens`
+- 每个 arm 的插件评估 system context + fixture prompt 总上限：`8000 characters`
+- 每个候选的 input + output 停止阈值：`100000 metered tokens`；usage 在 arm 完成后返回，因此最后一个在途 arm 可能造成小幅越界
+- cache-read token 单独记录，不计入 metered-token 硬上限
+- preflight 没有严格改善时在 10 个 arm 后停止，正式晋升标准不降低
+- 审批卡分别展示 input、output、cache-read 和 metered token 实际用量
+- 任一预算缺失、超过、超时或 usage 不可用均失败关闭，不改变 stable Skill；配置也不能放宽 `32 / 8000 / 100000` 三个安全上限
 
 ## 本地验证
 
@@ -142,7 +154,7 @@ $DSH_HOME/plugins/deepseek-skill-evolution/<version>/eval/fixtures/
 
 ## 当前发布门
 
-仓库已通过独立 code review（Critical 0、Important 0、Assessment Yes），当前等待维护者最终发布复核与公开发布。维护者不会由此仓库自动创建 GitHub remote、push、安装到真实 `$DSH_HOME` 或宣称真实 Harness 调用已验证。当前真实 stable Skill 已包含模糊批准防线，因此真实 model baseline 可能已经为零；届时候选必须因无严格改善而失败关闭。是否存在可改善 baseline 只能在发布后、经用户另行批准的真实调用门验证，不能由 stub 测试冒充。代码完成、测试通过、独立复核、公开发布、用户批准安装、重启挂载和真实调用是独立门。
+`0.1.0` 已完成独立 code review、公开发布、真实安装挂载和 `evolution_status` 调用。当前 `0.2.0` 已通过独立复核（Critical / Important / Minor 均为 0）与 125 项发布检查，并已安全升级本机安装；旧插件、preset/Skill 备份、正式策略和 authority state 均保留。已验证安装副本直接返回高 Token `ask`，但尚未在正式 Harness 候选会话触发该 ask，也未推送 GitHub或运行真实 paired evaluation。当前 stable Skill 已包含模糊批准防线，因此真实 model baseline 可能已经为零；届时候选必须因无严格改善而失败关闭。代码完成、测试通过、公开发布、安装挂载、live ask、真实 paired evaluation 和晋升是独立状态。
 
 ## 第三方说明
 

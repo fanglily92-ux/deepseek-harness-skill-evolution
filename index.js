@@ -84,8 +84,14 @@ export function apply(ctx, config = {}) {
         return { kind: 'deny', reason: 'Authority state may be changed only through evolution tools.' }
       }
     }
-    if (exec.name !== 'evolution_promote') return next()
     const candidateId = exec.arguments?.candidate_id
+    if (exec.name === 'evolution_validate') {
+      return {
+        kind: 'ask',
+        reason: `Validate ${candidateId} with a 10-arm preflight and up to 20 confirmation arms (30 maximum; stop after reported metered usage reaches 100000 tokens). This is a high-token operation and requires explicit user approval.`,
+      }
+    }
+    if (exec.name !== 'evolution_promote') return next()
     return {
       kind: 'ask',
       reason: `Promote ${candidateId} to the stable optimize-work-strategy catalog after all monotonic checks passed.`,

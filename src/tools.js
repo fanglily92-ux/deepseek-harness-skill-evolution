@@ -59,7 +59,7 @@ export function createEvolutionTools({ defineTool, services }) {
     makeTool({
       defineTool,
       name: 'evolution_validate',
-      description: 'Run isolated paired stable/candidate evaluation and fail closed on uncertainty or regression.',
+      description: 'High-token operation: after explicit user approval, run staged isolated stable/candidate evaluation and fail closed on uncertainty, budget exhaustion, or regression.',
       parameters: {
         candidate_id: { type: 'string', required: true, description: 'Exact EVO-YYYYMMDD-NNN identifier.' },
       },

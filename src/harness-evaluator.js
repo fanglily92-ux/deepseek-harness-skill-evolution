@@ -11,11 +11,42 @@ import { compareBlind, createBlindPair, revealBlindVerdict } from './blind-compa
 
 const EVALUATOR_VERSION = 'golden-label-v1'
 
+function validateEvaluationPolicy(policy) {
+  const invalid = (field) => { throw new Error(`invalid evaluation policy: ${field}`) }
+  if (policy?.schemaVersion !== 1) invalid('schemaVersion')
+  if (!policy.primaryMetricByMechanism || typeof policy.primaryMetricByMechanism !== 'object' || Array.isArray(policy.primaryMetricByMechanism)) invalid('primaryMetricByMechanism')
+  if (!Number.isInteger(policy.supportMinimum) || policy.supportMinimum !== 3) invalid('supportMinimum')
+  if (!Number.isInteger(policy.heldoutMinimum) || policy.heldoutMinimum !== 2) invalid('heldoutMinimum')
+  if (!Number.isInteger(policy.stochasticTrials) || policy.stochasticTrials !== 3) invalid('stochasticTrials')
+  if (!Number.isInteger(policy.maxRunsPerCandidate) || policy.maxRunsPerCandidate !== 30) invalid('maxRunsPerCandidate')
+  if (!Number.isInteger(policy.maxToolCallsPerCandidate) || policy.maxToolCallsPerCandidate < 0) invalid('maxToolCallsPerCandidate')
+  if (!Number.isInteger(policy.maxOutputTokensPerArm) || policy.maxOutputTokensPerArm < 1 || policy.maxOutputTokensPerArm > 32) invalid('maxOutputTokensPerArm')
+  if (!Number.isInteger(policy.maxPromptCharsPerArm) || policy.maxPromptCharsPerArm < 1 || policy.maxPromptCharsPerArm > 8000) invalid('maxPromptCharsPerArm')
+  if (!Number.isInteger(policy.maxMeteredTokensPerCandidate) || policy.maxMeteredTokensPerCandidate < 1 || policy.maxMeteredTokensPerCandidate > 100000) invalid('maxMeteredTokensPerCandidate')
+  if (!Number.isFinite(policy.timeoutMsPerRun) || policy.timeoutMsPerRun <= 0) invalid('timeoutMsPerRun')
+  return policy
+}
+
 function textFromAssistant(event) {
   return event?.data?.message?.content
     ?.filter((block) => block.type === 'text')
     .map((block) => block.text)
     .join('') ?? ''
+}
+
+function usageFromAssistant(event) {
+  const raw = event?.data?.usage ?? event?.data?.message?.usage
+  if (!raw || !Number.isFinite(raw.inputTokens) || raw.inputTokens < 0 || !Number.isFinite(raw.outputTokens) || raw.outputTokens < 0) {
+    const error = new Error('provider did not report token usage')
+    error.code = 'TOKEN_USAGE_UNAVAILABLE'
+    throw error
+  }
+  const value = (name) => Number.isFinite(raw[name]) && raw[name] >= 0 ? raw[name] : 0
+  return {
+    inputTokens: value('inputTokens'),
+    outputTokens: value('outputTokens'),
+    cacheReadTokens: value('cacheReadTokens'),
+  }
 }
 
 function parseDecision(text) {
@@ -71,6 +102,16 @@ async function blindCompareResult(result, binding) {
   }
 }
 
+function preflightImproves(results) {
+  if (results.some((result) => result.stable.criticalPass !== true || result.candidate.criticalPass !== true)) return false
+  const support = results.filter((result) => result.partition === 'support')
+  const heldout = results.filter((result) => result.partition === 'heldout')
+  if (heldout.some((result) => result.candidate.primary > result.stable.primary)) return false
+  const stableErrors = support.reduce((total, result) => total + result.stable.primary, 0)
+  const candidateErrors = support.reduce((total, result) => total + result.candidate.primary, 0)
+  return candidateErrors < stableErrors
+}
+
 export function createChildAgentArmRunner(ctx) {
   return async ({ arm, fixture, candidate, exec, budget }) => {
     if (!exec?.agent?.ctx?.agents || !ctx?.agentPresets) {
@@ -83,23 +124,34 @@ export function createChildAgentArmRunner(ctx) {
       error.code = 'INVALID_FIXTURE'
       throw error
     }
+    const contextText = evaluatorContext(candidate, arm)
+    const prompt = fixture.input.replaceAll('{{candidateId}}', candidate.id)
+    if (!Number.isInteger(budget?.maxPromptCharsPerArm) || budget.maxPromptCharsPerArm < 1 || contextText.length + prompt.length > budget.maxPromptCharsPerArm) {
+      const error = new Error('evaluation prompt exceeds the configured token proxy budget')
+      error.code = 'TOKEN_BUDGET'
+      throw error
+    }
+    if (!Number.isInteger(budget?.maxOutputTokensPerArm) || budget.maxOutputTokensPerArm < 1) {
+      const error = new Error('evaluation output token budget is unavailable')
+      error.code = 'TOKEN_BUDGET'
+      throw error
+    }
     const parent = exec.agent
     const handle = await parent.ctx.agents.create({
       sessionId: randomUUID(),
       meta: { cwd: candidate.armRoots[arm], parentSession: parent.id, origin: 'subagent', delegationDepth: 1 },
-      agentOptions: { ...parent.options },
+      agentOptions: { ...parent.options, maxTokens: budget.maxOutputTokensPerArm },
       setup(childCtx) {
         ctx.agentPresets.composeFrom(childCtx, parent.ctx)
         childCtx.tools.guard(() => 'evaluation agents cannot execute tools')
         childCtx.systemPrompt.context({
           name: `evolution:evaluation:${candidate.id}:${arm}`,
           order: 1000,
-          text: evaluatorContext(candidate, arm),
+          text: contextText,
         })
       },
     })
     try {
-      const prompt = fixture.input.replaceAll('{{candidateId}}', candidate.id)
       handle.agent.followup(Object.freeze({
         id: randomUUID(), role: 'user', source: Object.freeze({ kind: 'user' }),
         content: Object.freeze([{ type: 'text', text: prompt }]),
@@ -130,9 +182,16 @@ export function createChildAgentArmRunner(ctx) {
       const assistant = [...events].reverse().find((event) => event.type === 'assistant/message')
       const toolCalls = events.filter((event) => event.type === 'tool/call').length
       const decision = parseDecision(textFromAssistant(assistant))
+      const usage = usageFromAssistant(assistant)
+      if (usage.outputTokens > budget.maxOutputTokensPerArm) {
+        const error = new Error('evaluation output exceeded its configured token cap')
+        error.code = 'TOKEN_BUDGET'
+        throw error
+      }
       return {
         criticalPass: toolCalls === 0,
         primary: decision === fixture.expectedDecision ? 0 : 1,
+        usage,
       }
     } finally {
       await handle.dispose()
@@ -169,7 +228,7 @@ export function createHarnessEvaluator({ ctx, workspace, authorityRoot, fixtures
       readFile(stableStrategiesPath, 'utf8'),
       hashEvaluatorCode(),
     ])
-    const policy = JSON.parse(policyText)
+    const policy = validateEvaluationPolicy(JSON.parse(policyText))
     const binding = {
       schemaVersion: 1,
       stableSkillHash: hashCanonical(stableSkill),
@@ -204,21 +263,68 @@ export function createHarnessEvaluator({ ctx, workspace, authorityRoot, fixtures
     }
     try {
       const suite = buildEvaluationSuite({ candidate: executableCandidate, fixtureRegistry, policy })
-      const paired = await runPairedEvaluation({
-        suite,
+      const sharedBudget = {
+        maxToolCalls: policy.maxToolCallsPerCandidate,
+        maxOutputTokensPerArm: policy.maxOutputTokensPerArm,
+        maxPromptCharsPerArm: policy.maxPromptCharsPerArm,
+        timeoutMs: policy.timeoutMsPerRun,
+      }
+      const preflight = await runPairedEvaluation({
+        suite: { ...suite, policy: { ...suite.policy, stochasticTrials: 1 } },
         environment: { provider: exec?.agent?.options?.provider, model: exec?.agent?.options?.model },
-        budget: { maxRuns: policy.maxRunsPerCandidate, maxToolCalls: policy.maxToolCallsPerCandidate, timeoutMs: policy.timeoutMsPerRun },
+        budget: { maxRuns: 10, maxMeteredTokens: policy.maxMeteredTokensPerCandidate, ...sharedBudget },
         runArm: (options) => runArm({ ...options, candidate: executableCandidate, exec }),
       })
-      if (paired.status !== 'complete') {
-        return { ...paired, binding, comparator: { disagreement: true, mode: 'sealed-blind-golden-label' }, allGoldenIncluded: false }
+      if (preflight.status !== 'complete') {
+        return { ...preflight, stage: 'preflight-inconclusive', binding, comparator: { disagreement: true, mode: 'sealed-blind-golden-label' }, allGoldenIncluded: false }
+      }
+      let stage = 'preflight-rejected'
+      let pairedResults = preflight.fixtureResults
+      let confirmation
+      if (preflightImproves(preflight.fixtureResults)) {
+        const remainingTokens = policy.maxMeteredTokensPerCandidate - (preflight.budget.usage?.meteredTokens ?? 0)
+        confirmation = await runPairedEvaluation({
+          suite: { ...suite, policy: { ...suite.policy, stochasticTrials: Math.max(0, suite.policy.stochasticTrials - 1) } },
+          environment: { provider: exec?.agent?.options?.provider, model: exec?.agent?.options?.model },
+          budget: { maxRuns: 20, maxMeteredTokens: remainingTokens, ...sharedBudget },
+          runArm: (options) => runArm({ ...options, candidate: executableCandidate, exec }),
+        })
+        if (confirmation.status !== 'complete') {
+          const usage = {
+            inputTokens: (preflight.budget.usage?.inputTokens ?? 0) + (confirmation.budget.usage?.inputTokens ?? 0),
+            outputTokens: (preflight.budget.usage?.outputTokens ?? 0) + (confirmation.budget.usage?.outputTokens ?? 0),
+            cacheReadTokens: (preflight.budget.usage?.cacheReadTokens ?? 0) + (confirmation.budget.usage?.cacheReadTokens ?? 0),
+            meteredTokens: (preflight.budget.usage?.meteredTokens ?? 0) + (confirmation.budget.usage?.meteredTokens ?? 0),
+          }
+          return {
+            ...confirmation,
+            stage: 'confirmation-inconclusive',
+            binding,
+            budget: {
+              maxRuns: policy.maxRunsPerCandidate,
+              maxMeteredTokens: policy.maxMeteredTokensPerCandidate,
+              ...sharedBudget,
+              actualRuns: (preflight.budget.actualRuns ?? 0) + (confirmation.budget.actualRuns ?? 0),
+              usage,
+              exhausted: confirmation.budget.exhausted,
+            },
+            comparator: { disagreement: true, mode: 'sealed-blind-golden-label' },
+            allGoldenIncluded: false,
+          }
+        }
+        stage = 'full-validation'
+        pairedResults = [
+          ...preflight.fixtureResults,
+          ...confirmation.fixtureResults.map((result) => ({ ...result, trial: result.trial + 1 })),
+        ]
       }
       const fixtureResults = []
-      for (const result of paired.fixtureResults) {
+      for (const result of pairedResults) {
         fixtureResults.push({
           fixtureId: result.fixtureId,
           partition: result.partition,
           golden: result.golden,
+          trial: result.trial,
           stableCriticalPass: result.stable.criticalPass,
           candidateCriticalPass: result.candidate.criticalPass,
           stablePrimary: result.stable.primary,
@@ -228,9 +334,15 @@ export function createHarnessEvaluator({ ctx, workspace, authorityRoot, fixtures
       }
       const comparatorDisagreement = fixtureResults.some((result) => result.blindComparison.disagreement)
       const allGolden = fixtureRegistry.filter((fixture) => fixture.golden).map((fixture) => fixture.id)
+      const usage = {
+        inputTokens: (preflight.budget.usage?.inputTokens ?? 0) + (confirmation?.budget.usage?.inputTokens ?? 0),
+        outputTokens: (preflight.budget.usage?.outputTokens ?? 0) + (confirmation?.budget.usage?.outputTokens ?? 0),
+        cacheReadTokens: (preflight.budget.usage?.cacheReadTokens ?? 0) + (confirmation?.budget.usage?.cacheReadTokens ?? 0),
+        meteredTokens: (preflight.budget.usage?.meteredTokens ?? 0) + (confirmation?.budget.usage?.meteredTokens ?? 0),
+      }
       return {
-        status: 'complete', binding,
-        budget: paired.budget,
+        status: 'complete', stage, binding,
+        budget: { maxRuns: policy.maxRunsPerCandidate, maxMeteredTokens: policy.maxMeteredTokensPerCandidate, ...sharedBudget, actualRuns: fixtureResults.length * 2, usage, exhausted: false },
         comparator: { disagreement: comparatorDisagreement, mode: 'sealed-blind-golden-label' },
         allGoldenIncluded: allGolden.every((id) => fixtureResults.some((result) => result.fixtureId === id)),
         fixtureResults,

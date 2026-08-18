@@ -8,5 +8,8 @@
   "stochasticTrials": 3,
   "maxRunsPerCandidate": 30,
   "maxToolCallsPerCandidate": 120,
+  "maxOutputTokensPerArm": 32,
+  "maxPromptCharsPerArm": 8000,
+  "maxMeteredTokensPerCandidate": 100000,
   "timeoutMsPerRun": 120000
 }

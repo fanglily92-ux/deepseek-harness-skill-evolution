@@ -48,6 +48,31 @@ function attachBinding(evaluator) {
   return evaluator
 }
 
+function completeEvaluationReport(candidate) {
+  const row = (fixtureId, partition, trial) => ({
+    fixtureId, partition, trial,
+    stableCriticalPass: true, candidateCriticalPass: true,
+    stablePrimary: partition === 'support' ? 1 : 0,
+    candidatePrimary: 0,
+  })
+  return {
+    status: 'complete', stage: 'full-validation',
+    budget: {
+      maxRuns: 30, actualRuns: 30, maxToolCalls: 120,
+      maxOutputTokensPerArm: 32, maxPromptCharsPerArm: 8000,
+      maxMeteredTokens: 100000, timeoutMs: 120000,
+      usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 500, meteredTokens: 1100 },
+      exhausted: false,
+    },
+    comparator: { disagreement: false }, allGoldenIncluded: true,
+    binding: candidate.evaluationBinding,
+    fixtureResults: [
+      ...[1, 2, 3].flatMap((id) => [1, 2, 3].map((trial) => row(`SUP-${id}`, 'support', trial))),
+      ...[1, 2].flatMap((id) => [1, 2, 3].map((trial) => row(`HOLD-${id}`, 'heldout', trial))),
+    ],
+  }
+}
+
 test('default runtime reviews independent evidence and creates an isolated candidate', async () => {
   const setup = await fixture()
   const services = createRuntimeServices({ workspace: setup.workspace, authorityRoot: setup.authorityRoot, evaluator: attachBinding(async () => { throw new Error('not used') }), now: () => new Date('2026-08-18T00:00:00Z') })
@@ -85,14 +110,7 @@ test('default runtime validation fails closed when no paired evaluator is config
 
 test('runtime promotes only a fully validated candidate and advances stable by one append', async () => {
   const setup = await fixture()
-  const evaluator = attachBinding(async (candidate) => ({
-    status: 'complete', budget: { exhausted: false }, comparator: { disagreement: false }, allGoldenIncluded: true,
-    binding: candidate.evaluationBinding,
-    fixtureResults: [
-      ...[1, 2, 3].map((id) => ({ fixtureId: `SUP-${id}`, partition: 'support', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 1, candidatePrimary: 0 })),
-      ...[1, 2].map((id) => ({ fixtureId: `HOLD-${id}`, partition: 'heldout', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 0, candidatePrimary: 0 })),
-    ],
-  }))
+  const evaluator = attachBinding(async (candidate) => completeEvaluationReport(candidate))
   const services = createRuntimeServices({ workspace: setup.workspace, authorityRoot: setup.authorityRoot, evaluator, now: () => new Date('2026-08-18T00:00:00Z') })
   const proposal = await services.propose({
     mechanism: 'UNCLEAR_APPROVAL', case_ids: setup.caseIds, task_kinds: ['promotion'],
@@ -103,8 +121,8 @@ test('runtime promotes only a fully validated candidate and advances stable by o
   assert.equal(validation.status, 'awaiting-approval')
   assert.equal(validation.approvalCard.candidateId, proposal.candidateId)
   assert.equal(validation.approvalCard.hashes.validationReport, validation.validationReportHash)
-  assert.deepEqual(validation.approvalCard.evaluation.support, { count: 3, stableErrors: 3, candidateErrors: 0 })
-  assert.deepEqual(validation.approvalCard.evaluation.heldout, { count: 2, stableErrors: 0, candidateErrors: 0 })
+  assert.deepEqual(validation.approvalCard.evaluation.support, { count: 9, stableErrors: 9, candidateErrors: 0 })
+  assert.deepEqual(validation.approvalCard.evaluation.heldout, { count: 6, stableErrors: 0, candidateErrors: 0 })
   assert.equal(validation.approvalCard.guardrails.strictSupportImprovement, true)
   assert.equal(validation.approvalCard.exactDiff.operation, 'append-one-rule')
   const status = await services.status()
@@ -157,18 +175,14 @@ test('runtime atomically claims one validation attempt across processes', async 
   const setup = await fixture()
   let evaluations = 0
   let release
+  let entered
   const wait = new Promise((resolve) => { release = resolve })
+  const evaluatorEntered = new Promise((resolve) => { entered = resolve })
   const evaluator = attachBinding(async (candidate) => {
     evaluations += 1
+    entered()
     await wait
-    return {
-      status: 'complete', budget: { exhausted: false }, comparator: { disagreement: false }, allGoldenIncluded: true,
-      binding: candidate.evaluationBinding,
-      fixtureResults: [
-        ...[1, 2, 3].map((id) => ({ fixtureId: `SUP-${id}`, partition: 'support', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 1, candidatePrimary: 0 })),
-        ...[1, 2].map((id) => ({ fixtureId: `HOLD-${id}`, partition: 'heldout', stableCriticalPass: true, candidateCriticalPass: true, stablePrimary: 0, candidatePrimary: 0 })),
-      ],
-    }
+    return completeEvaluationReport(candidate)
   })
   const first = createRuntimeServices({ workspace: setup.workspace, authorityRoot: setup.authorityRoot, evaluator, now: () => new Date('2026-08-18T00:00:00Z') })
   const second = createRuntimeServices({ workspace: setup.workspace, authorityRoot: setup.authorityRoot, evaluator, now: () => new Date('2026-08-18T00:00:00Z') })
@@ -178,7 +192,7 @@ test('runtime atomically claims one validation attempt across processes', async 
     avoid: 'Do not interpret generic continuation language as approval.',
   })
   const running = first.validate({ candidate_id: proposal.candidateId })
-  await new Promise((resolve) => setImmediate(resolve))
+  await evaluatorEntered
   await assert.rejects(second.validate({ candidate_id: proposal.candidateId }), /not awaiting validation/)
   release()
   await running

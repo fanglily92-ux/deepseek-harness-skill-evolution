@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-skill-evolution",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local, approval-gated Skill evolution workbench for DeepSeek Harness.",
   "private": true,
   "license": "MIT",
