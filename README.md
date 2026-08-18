@@ -1,6 +1,6 @@
 # DeepSeek Harness Skill Evolution
 
-一个本地、可审计、人工批准后才生效的 DeepSeek Harness Skill 自进化插件。当前源码版本：`0.2.0`。`0.1.0` 已公开发布并完成正式 Harness 状态调用；`0.2.0` 已安装到真实 `~/.dsh`，`video-reader` preset 已切换到新入口，重启后的 Harness Web HTTP 200，安装副本的五工具与 `evolution_validate` 原生 ask hook 已做零模型调用验证。`0.2.0` 尚未推送 GitHub，也未用真实候选触发 paired evaluation 或 live Harness ask。
+一个本地、可审计、人工批准后才生效的 DeepSeek Harness Skill 自进化插件。当前源码版本：`0.2.0`。`0.1.0` 已公开发布并完成正式 Harness 状态调用；`0.2.0` 已推送到公开 GitHub `main`，并安装到真实 `~/.dsh`。`video-reader` preset 已切换到新入口，重启后的 Harness Web HTTP 200，安装副本的五工具与 `evolution_validate` 原生 ask hook 已做零模型调用验证。尚未用真实候选触发 paired evaluation 或 live Harness ask。
 
 它不让模型直接改正式 Skill。它把真实反馈压缩成隐私最小化收据，从重复失败中形成窄范围策略候选，用 stable/candidate 成对回归证明候选在已知边界内更好，最后只在用户明确批准精确 `EVO-*` 编号后原子追加到稳定策略。
 
@@ -154,7 +154,7 @@ $DSH_HOME/plugins/deepseek-skill-evolution/<version>/eval/fixtures/
 
 ## 当前发布门
 
-`0.1.0` 已完成独立 code review、公开发布、真实安装挂载和 `evolution_status` 调用。当前 `0.2.0` 已通过独立复核（Critical / Important / Minor 均为 0）与 125 项发布检查，并已安全升级本机安装；旧插件、preset/Skill 备份、正式策略和 authority state 均保留。已验证安装副本直接返回高 Token `ask`，但尚未在正式 Harness 候选会话触发该 ask，也未推送 GitHub或运行真实 paired evaluation。当前 stable Skill 已包含模糊批准防线，因此真实 model baseline 可能已经为零；届时候选必须因无严格改善而失败关闭。代码完成、测试通过、公开发布、安装挂载、live ask、真实 paired evaluation 和晋升是独立状态。
+`0.1.0` 已完成独立 code review、公开发布、真实安装挂载和 `evolution_status` 调用。当前 `0.2.0` 已通过独立复核（Critical / Important / Minor 均为 0）与 125 项发布检查，已推送公开 GitHub `main`，并安全升级本机安装；旧插件、preset/Skill 备份、正式策略和 authority state 均保留。已验证安装副本直接返回高 Token `ask`，但尚未在正式 Harness 候选会话触发该 ask，也未运行真实 paired evaluation。当前 stable Skill 已包含模糊批准防线，因此真实 model baseline 可能已经为零；届时候选必须因无严格改善而失败关闭。代码完成、测试通过、公开发布、安装挂载、live ask、真实 paired evaluation 和晋升是独立状态。
 
 ## 第三方说明
 
